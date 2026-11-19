@@ -1,0 +1,6 @@
+{
+  "name": "Saini Simulator",
+  "description": "3D Open-World City Exploration Game by Ajay Saini (@ajayzsaini)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
