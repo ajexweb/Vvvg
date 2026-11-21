@@ -42,8 +42,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.ui.theme.CityBorder
 import com.example.ui.theme.CityObsidian
-import com.example.ui.theme.ElectricCyan
+import com.example.ui.theme.CitySlate
 import com.example.ui.theme.SunsetAmber
 import com.example.ui.theme.SunsetGold
 import com.example.ui.theme.TextPrimary
@@ -56,7 +57,7 @@ fun SplashScreen(
 ) {
     val animatedProgress by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
-        animationSpec = tween(durationMillis = 280),
+        animationSpec = tween(durationMillis = 260),
         label = "splash_progress"
     )
 
@@ -66,7 +67,6 @@ fun SplashScreen(
             .background(CityObsidian)
             .testTag("splash_screen")
     ) {
-        // Real generated AAA city key art backdrop
         Image(
             painter = painterResource(id = R.drawable.img_city_hero),
             contentDescription = "Saini Simulator City Skyline",
@@ -74,14 +74,13 @@ fun SplashScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Cinematic gradient vignette
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            CityObsidian.copy(alpha = 0.65f),
+                            CityObsidian.copy(alpha = 0.55f),
                             CityObsidian.copy(alpha = 0.45f),
                             CityObsidian.copy(alpha = 0.94f)
                         )
@@ -93,57 +92,55 @@ fun SplashScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 24.dp, vertical = 28.dp),
+                .padding(horizontal = 24.dp, vertical = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Top developer badge
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(CityObsidian.copy(alpha = 0.72f))
-                    .border(1.dp, SunsetGold.copy(alpha = 0.45f), RoundedCornerShape(50))
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(CityObsidian.copy(alpha = 0.78f))
+                    .border(1.dp, SunsetGold.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.LocationCity,
                     contentDescription = null,
                     tint = SunsetGold,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(16.dp)
                 )
-                Spacer(modifier = Modifier.size(8.dp))
+                Spacer(modifier = Modifier.size(6.dp))
                 Text(
                     text = "OPEN WORLD 3D EDITION",
                     style = MaterialTheme.typography.labelSmall,
                     color = SunsetGold,
-                    letterSpacing = 1.6.sp
+                    letterSpacing = 1.4.sp
                 )
             }
 
-            // Center title
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.widthIn(max = 560.dp)
             ) {
                 Text(
                     text = "SAINI SIMULATOR",
-                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 38.sp),
+                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 46.sp),
                     color = TextPrimary,
                     textAlign = TextAlign.Center,
+                    letterSpacing = 3.sp,
                     modifier = Modifier.testTag("splash_title")
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = stringResource(R.string.game_subtitle).uppercase(),
                     style = MaterialTheme.typography.titleMedium,
-                    color = ElectricCyan,
-                    letterSpacing = 2.2.sp,
+                    color = SunsetGold,
+                    letterSpacing = 2.0.sp,
                     textAlign = TextAlign.Center
                 )
             }
 
-            // Bottom loading bar + official Ajay Saini branding
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
@@ -167,53 +164,37 @@ fun SplashScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(12.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Color(0xFF152036))
-                        .border(1.dp, ElectricCyan.copy(alpha = 0.45f), RoundedCornerShape(50))
-                        .padding(2.dp)
+                        .height(9.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(CitySlate)
+                        .border(1.dp, CityBorder, RoundedCornerShape(4.dp))
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxHeight()
-                            .fillMaxWidth(animatedProgress.coerceAtLeast(0.03f))
-                            .clip(RoundedCornerShape(50))
+                            .fillMaxWidth(animatedProgress.coerceAtLeast(0.04f))
                             .background(
                                 Brush.horizontalGradient(
-                                    colors = listOf(SunsetAmber, SunsetGold, ElectricCyan)
+                                    colors = listOf(SunsetAmber, SunsetGold)
                                 )
                             )
                     )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(CityObsidian.copy(alpha = 0.78f))
-                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
-                        .padding(horizontal = 20.dp, vertical = 10.dp)
-                ) {
-                    Text(
-                        text = "Developed by Ajay Saini (@ajayzsaini)",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        modifier = Modifier.testTag("splash_developer_credit")
-                    )
-                    Text(
-                        text = "Native OpenGL ES 3D Engine • Zero-Lag Build",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary
-                    )
-                }
+                Text(
+                    text = "Developed by Ajay Saini (@ajayzsaini)",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextSecondary,
+                    modifier = Modifier.testTag("splash_developer_credit")
+                )
             }
         }
     }

@@ -1,0 +1,61 @@
+# AI Studio Integration Guide — Realistic Ajay 3D Character Upgrade (Saini Simulator)
+
+## Overview
+This upgrade replaces the old primitive-cylinder/sphere player character in Saini Simulator (Android Kotlin + OpenGL ES 2.0) with a realistic, deep-detailed custom 3D character modeled after the user's real photos:
+- Real front-face photo mapped onto a sculpted 3D head mesh (jaw taper, brow ridge, nose bridge, chin) with soft skin feathering.
+- 3D layered wavy black hair and subtle 3D jawline beard depth.
+- Dark olive-green untucked cotton shirt with woven fabric grain, center button placket, maroon-center buttons, left chest pocket, 3D folded collar, and 3/4 rolled-up sleeves.
+- Red Kalawa (sacred thread) on the left wrist.
+- Washed indigo blue denim jeans with twill grain, thigh fade whiskering, and ochre seam stitching, paired with dark casual sneakers with white midsoles.
+- Smooth 2-Joint Forward Kinematics (FK) animation system supporting Idle (breathing + subtle look), Walk, Sprint, and Jump states with delta-time lerp blending and matching 2-joint planar shadows.
+
+## Files Included in This Package (Drop-In Full Replacements)
+Replace or add these 4 files at their exact paths in the Android project:
+1. `app/src/main/res/drawable/img_player_face.jpg` (NEW FILE — 512x512 cropped & centered front-face photo texture)
+2. `app/src/main/java/com/example/game/engine/ShaderProgram.kt` (FULL UPDATED FILE)
+3. `app/src/main/java/com/example/game/engine/CityRendererSupport.kt` (FULL UPDATED FILE)
+4. `app/src/main/java/com/example/game/engine/OpenGLCityRenderer.kt` (FULL UPDATED FILE)
+
+## Exact Changes Made Per File
+
+### 1. `ShaderProgram.kt`
+- Added `GlTextureHelper.loadPlayerFaceTexture(context, R.drawable.img_player_face)`: composites the face photo onto a matched warm skin base with a top hairline gradient and radial feather mask (`DST_IN`) so there are no sharp seams or back-head repeats.
+- Added `GlTextureHelper.createGreenShirtTexture()`: procedurally generates a 512x512 dark olive-green cotton shirt texture with fabric weave, vertical folds, center placket (`u = 0.50`), maroon buttons, and left chest pocket (`u ~ 0.37`).
+- Added `GlTextureHelper.createDenimJeansTexture()`: procedurally generates a 512x512 washed blue indigo denim texture with twill noise, whiskering fade bands, and side seam stitching.
+- Added `GlMeshFactory.createSculptedHeadMesh()`: 960-triangle outward-CCW sculpted head mesh with frontal planar UV projection (`+Z` face).
+- Added `GlMeshFactory.createSculptedTorsoMesh()`: 616-triangle outward-CCW male shirt torso mesh with broad shoulders, chest contour, tapered waist, untucked curved hem, and closed top/bottom caps.
+
+### 2. `CityRendererSupport.kt`
+- Extended `CityRenderAssets` with 5 new optional fields (with safe fallbacks):
+  - `playerHeadMesh: GlMesh`
+  - `playerTorsoMesh: GlMesh`
+  - `texPlayerFace: Int`
+  - `texPlayerShirt: Int`
+  - `texPlayerJeans: Int`
+- Updated `CityPropDrawer.drawHumanPlayer(...)` to delegate to `drawAjayRealisticPlayer(...)` using zero-allocation reusable `FloatArray(16)` matrices (`mRoot`, `mPelvis`, `mTorso`, `mHead`, `mUpper`, `mLower`).
+- Implemented smooth delta-time state blending (`moveBlend`, `sprintBlend`, `airBlend`):
+  - Legs: `Pelvis -> Hip -> Thigh -> Knee -> Shin -> Ankle -> Sneaker` (knees bend naturally backward `+X` during swing lift and sprint).
+  - Arms: `Torso -> Shoulder -> UpperArm -> Elbow -> Rolled Cuff + Skin Forearm + Kalawa -> Hand` (elbows bend forward `-X`, pumping harder during sprint).
+  - Torso & Head: natural breathing in Idle, forward lean (`~14 deg` in sprint) with counter-stabilized head pitch and subtle hip bob/sway/shoulder counter-twist.
+- Updated `CityPropDrawer.drawHumanShadow(...)` to project matching 2-joint thigh + bent-shin shadows.
+- Left all NPC rendering (`drawNpcCharacter`, `drawArticulatedHuman`), trees, cars, streetlights, benches, and kiosks completely untouched.
+
+### 3. `OpenGLCityRenderer.kt`
+- Only updated `onSurfaceCreated(...)` where `CityRenderAssets(...)` is constructed by passing the 5 new meshes/textures:
+  - `playerHeadMesh = GlMeshFactory.createSculptedHeadMesh()`
+  - `playerTorsoMesh = GlMeshFactory.createSculptedTorsoMesh()`
+  - `texPlayerFace = GlTextureHelper.loadPlayerFaceTexture(context, R.drawable.img_player_face)`
+  - `texPlayerShirt = GlTextureHelper.createGreenShirtTexture()`
+  - `texPlayerJeans = GlTextureHelper.createDenimJeansTexture()`
+
+## What MUST Remain Unchanged
+Do NOT alter any of the following existing game systems:
+- `PlayerInputState` and `GameplayScreen.kt` (Joystick, D-Pad, WASD/Arrows, Sprint, Jump)
+- `OpenGLCityRenderer.updateSimulation()` physics & speeds (walk `5.8`, sprint `11.2`, jump `9.4`, gravity `24`, walk cycle `9`, sprint cycle `13.5`)
+- Building/car/NPC collision resolution and interior entry/door systems
+- Third-person follow camera, drag rotation, zoom, pitch, and stencil shadow pipeline
+
+## Verification & Quick Tuning Notes for AI Studio
+1. Confirm `app/src/main/res/drawable/img_player_face.jpg` exists so `R.drawable.img_player_face` resolves cleanly.
+2. Verify all 3 Kotlin files compile with zero missing imports (all required `android.graphics.*`, `kotlin.math.*`, and `kotlin.random.Random` imports are already included).
+3. If face positioning on the head needs minor tuning after runtime visual check, adjust `dst = Rect(24, 20, size - 24, size - 20)` in `GlTextureHelper.loadPlayerFaceTexture()` or the `u`/`v` multipliers in `GlMeshFactory.createSculptedHeadMesh()`.

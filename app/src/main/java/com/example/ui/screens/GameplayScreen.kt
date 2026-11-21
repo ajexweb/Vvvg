@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,17 +33,27 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
+import androidx.compose.material.icons.rounded.Campaign
+import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.NightsStay
 import androidx.compose.material.icons.rounded.PanTool
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.TwoWheeler
+import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.WaterDrop
+import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -67,6 +78,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -86,23 +100,31 @@ import com.example.game.engine.CityGLSurfaceView
 import com.example.game.engine.CityWorldData
 import com.example.game.engine.GameEngineListener
 import com.example.game.engine.PlayerInputState
+import com.example.game.model.ActiveVehicleMode
 import com.example.game.model.CityZones
 import com.example.game.model.ControlLayout
 import com.example.game.model.GameTelemetry
+import com.example.game.model.WeatherState
 import com.example.game.viewmodel.GameUiState
 import com.example.ui.theme.CityBorder
 import com.example.ui.theme.CityCard
 import com.example.ui.theme.CityObsidian
 import com.example.ui.theme.CitySlate
 import com.example.ui.theme.CrimsonAlert
-import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.EmeraldPulse
 import com.example.ui.theme.SunsetGold
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sqrt
+
+// Free Fire / BGMI Clean Matte Translucent Control Colors (NO Neon Cyan!)
+private val HudDarkGlass = Color(0xFF12161D).copy(alpha = 0.68f)
+private val HudControlGlass = Color(0xFF14181F).copy(alpha = 0.54f)
+private val HudBorderSubtle = Color.White.copy(alpha = 0.28f)
 
 @Composable
 fun GameplayScreen(
@@ -110,39 +132,57 @@ fun GameplayScreen(
     inputState: PlayerInputState,
     engineListener: GameEngineListener,
     onTogglePause: () -> Unit,
+    onToggleMute: () -> Unit,
     onRestart: (resetEngine: () -> Unit) -> Unit,
-    onReturnToLobby: () -> Unit
+    onReturnToLobby: () -> Unit,
+    onSetWaypoint: (Float, Float) -> Unit = { _, _ -> },
+    onClearWaypoint: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val glView = remember {
         CityGLSurfaceView(context, inputState, engineListener)
     }
+    var isFullMapOpen by remember { mutableStateOf(false) }
 
-    // Keep renderer synchronized with selected skin, quality, sensitivity, and pause state
     LaunchedEffect(
         uiState.selectedSkin,
         uiState.settings.graphicsQuality,
         uiState.settings.cameraSensitivity,
-        uiState.isPaused
+        uiState.settings.streamingRadiusMeters,
+        uiState.settings.targetFps,
+        uiState.isPaused,
+        isFullMapOpen,
+        uiState.waypointX,
+        uiState.waypointZ
     ) {
         glView.cityRenderer.activeSkin = uiState.selectedSkin
         glView.cityRenderer.graphicsQuality = uiState.settings.graphicsQuality
         glView.cityRenderer.cameraSensitivity = uiState.settings.cameraSensitivity
-        glView.cityRenderer.isPaused = uiState.isPaused
+        glView.cityRenderer.streamingRadiusMeters = uiState.settings.streamingRadiusMeters
+        glView.cityRenderer.isPaused = uiState.isPaused || isFullMapOpen
+        glView.cityRenderer.waypointActive = uiState.waypointX != null && uiState.waypointZ != null
+        glView.cityRenderer.waypointX = uiState.waypointX ?: 0f
+        glView.cityRenderer.waypointZ = uiState.waypointZ ?: 0f
+        glView.applyTargetFrameRate(uiState.settings.targetFps)
     }
 
     DisposableEffect(glView) {
         glView.onResume()
         onDispose {
+            inputState.holdGateOpen = false
+            inputState.holdGateClose = false
             glView.onPause()
         }
     }
 
     BackHandler {
-        onTogglePause()
+        if (isFullMapOpen) {
+            isFullMapOpen = false
+        } else {
+            onTogglePause()
+        }
     }
 
-    // Hardware keyboard state tracking (WASD / Arrow keys / Space / Shift / E / Esc)
     val focusRequester = remember { FocusRequester() }
     var keyW by remember { mutableStateOf(false) }
     var keyS by remember { mutableStateOf(false) }
@@ -186,7 +226,19 @@ fun GameplayScreen(
                         true
                     }
                     Key.E -> {
-                        if (isDown) inputState.interactQueued = true
+                        if (uiState.telemetry.nearbyGateName != null) {
+                            inputState.holdGateOpen = isDown
+                        } else if (isDown) {
+                            inputState.interactQueued = true
+                        }
+                        true
+                    }
+                    Key.R -> {
+                        inputState.holdGateClose = isDown
+                        true
+                    }
+                    Key.H -> {
+                        if (isDown) inputState.hornQueued = true
                         true
                     }
                     Key.Escape -> {
@@ -198,13 +250,13 @@ fun GameplayScreen(
             }
             .testTag("gameplay_screen")
     ) {
-        // 1. Native OpenGL ES 2.0 3D City Viewport
+        // 1. Native OpenGL ES 3D Viewport
         AndroidView(
             factory = { glView },
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. Camera Touch-Drag Layer (behind HUD & buttons)
+        // 2. Smooth 360-deg Camera Orbit Touch-Drag Layer
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -217,17 +269,17 @@ fun GameplayScreen(
                 }
         )
 
-        // 3. Gameplay HUD & Touch Controls Overlay
+        // 3. Clean Official Free Fire / BGMI-Style Gameplay HUD (NO debug clutter!)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            // Top-Left: Health, Stamina, Score & Discovery Counter
+            // Top-Left: Clean HP/Stamina + Compact Score/Zones + Compact Location/Weather toggles
             Column(
                 modifier = Modifier.align(Alignment.TopStart),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -240,76 +292,167 @@ fun GameplayScreen(
                     )
                 }
 
-                Text(
-                    text = "Saini Simulator • Ajay Saini (@ajayzsaini)",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.80f),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(CityObsidian.copy(alpha = 0.55f))
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = uiState.telemetry.currentLocationLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextPrimary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(HudDarkGlass)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("hud_location_label")
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(HudDarkGlass)
+                            .border(1.dp, HudBorderSubtle, RoundedCornerShape(6.dp))
+                            .clickable { inputState.toggleDayNightQueued = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("btn_toggle_time")
+                    ) {
+                        Icon(
+                            imageVector = if (uiState.telemetry.isNight) Icons.Rounded.NightsStay else Icons.Rounded.WbSunny,
+                            contentDescription = "Toggle Day Night",
+                            tint = if (uiState.telemetry.isNight) Color.White else SunsetGold,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = uiState.telemetry.timeOfDayLabel.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextPrimary,
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    val isRain = uiState.telemetry.weatherState == WeatherState.RAIN
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isRain) SunsetGold.copy(alpha = 0.25f) else HudDarkGlass)
+                            .border(
+                                1.dp,
+                                if (isRain) SunsetGold else HudBorderSubtle,
+                                RoundedCornerShape(6.dp)
+                            )
+                            .clickable { inputState.toggleWeatherQueued = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("btn_toggle_weather")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.WaterDrop,
+                            contentDescription = "Toggle Rain",
+                            tint = if (isRain) SunsetGold else TextSecondary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = if (isRain) "RAIN" else "CLEAR",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isRain) SunsetGold else TextPrimary,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
             }
 
-            // Top-Right: Live Mini-Map Radar + Pause Button
+            // Top-Right: Interactive Tap-to-Expand Tactical MiniMap + Pause Button
             Row(
                 modifier = Modifier.align(Alignment.TopEnd),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Top
             ) {
-                MiniMapRadar(telemetry = uiState.telemetry)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    MiniMapRadar(
+                        telemetry = uiState.telemetry,
+                        streamingRadiusMeters = uiState.settings.streamingRadiusMeters,
+                        waypointX = uiState.waypointX,
+                        waypointZ = uiState.waypointZ,
+                        onOpenFullMap = { isFullMapOpen = true }
+                    )
+                    if (uiState.waypointX != null && uiState.waypointZ != null) {
+                        val wdx = uiState.waypointX - uiState.telemetry.playerX
+                        val wdz = uiState.waypointZ - uiState.telemetry.playerZ
+                        val distM = sqrt(wdx * wdx + wdz * wdz).roundToInt()
+                        Text(
+                            text = "PIN • ${distM}m",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = CityObsidian,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(SunsetGold)
+                                .clickable { isFullMapOpen = true }
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                                .testTag("hud_waypoint_distance")
+                        )
+                    }
+                }
 
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .size(48.dp)
                         .minimumInteractiveComponentSize()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(CityObsidian.copy(alpha = 0.82f))
-                        .border(1.2.dp, SunsetGold.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(HudDarkGlass)
+                        .border(1.dp, HudBorderSubtle, RoundedCornerShape(8.dp))
                         .clickable(onClick = onTogglePause)
                         .testTag("btn_pause")
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Pause,
                         contentDescription = "Pause Game",
-                        tint = SunsetGold,
-                        modifier = Modifier.size(26.dp)
+                        tint = TextPrimary,
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
 
-            // Top-Center Toast Banner (Zone Discovered / Pickup / Interaction)
+            // Top-Center Clean Notification Banner
             AnimatedVisibility(
                 visible = uiState.bannerMessage != null,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 66.dp)
+                    .padding(top = 56.dp)
             ) {
                 uiState.bannerMessage?.let { msg ->
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(CityObsidian.copy(alpha = 0.88f))
-                            .border(1.2.dp, SunsetGold, RoundedCornerShape(50))
-                            .padding(horizontal = 18.dp, vertical = 8.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(CityObsidian.copy(alpha = 0.86f))
+                            .border(1.dp, SunsetGold.copy(alpha = 0.8f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
                     ) {
                         Text(
                             text = msg,
                             style = MaterialTheme.typography.labelLarge,
-                            color = SunsetGold
+                            color = TextPrimary,
+                            fontSize = 14.sp
                         )
                     }
                 }
             }
 
-            // Bottom-Left: Virtual Joystick or Touch D-Pad
+            // Bottom-Left: Clean Free Fire / BGMI Virtual Joystick or D-Pad
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(bottom = 8.dp)
+                    .padding(start = 6.dp, bottom = 6.dp)
             ) {
                 if (uiState.settings.controlLayout == ControlLayout.JOYSTICK) {
                     VirtualJoystick(
@@ -328,14 +471,92 @@ fun GameplayScreen(
                 }
             }
 
-            // Bottom-Right: Run (Sprint), Jump, and Interact Action Buttons
+            // Bottom-Right: Clean Tactical Action Controls (Vehicle Speed, Horn, Run, Jump, Interact)
             Column(
                 horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 8.dp)
+                    .padding(end = 6.dp, bottom = 6.dp)
             ) {
+                if (uiState.telemetry.vehicleMode != ActiveVehicleMode.ON_FOOT) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(HudDarkGlass)
+                            .border(1.dp, HudBorderSubtle, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                            .testTag("hud_vehicle_speed")
+                    ) {
+                        Icon(
+                            imageVector = if (uiState.telemetry.vehicleMode == ActiveVehicleMode.CAR) Icons.Rounded.DirectionsCar else Icons.Rounded.TwoWheeler,
+                            contentDescription = "Vehicle Mode",
+                            tint = SunsetGold,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "${uiState.telemetry.vehicleSpeedKmh} KM/H",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = TextPrimary
+                        )
+                    }
+                }
+
+                // Hand-Controlled Interactive Gate Controls (Stop / Leave-Anywhere!)
+                val nearGateName = uiState.telemetry.nearbyGateName
+                val inVehicle = uiState.telemetry.vehicleMode != ActiveVehicleMode.ON_FOOT
+                if (!inVehicle && nearGateName != null) {
+                    val pct = (uiState.telemetry.nearbyGateProgress * 100f).roundToInt().coerceIn(0, 100)
+                    val stateLabel = when {
+                        pct <= 2 -> "CLOSED"
+                        pct >= 98 -> "OPEN"
+                        else -> "$pct% OPEN"
+                    }
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.testTag("hud_gate_controls")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(HudDarkGlass)
+                                .border(1.dp, SunsetGold.copy(alpha = 0.75f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "$nearGateName  •  $stateLabel",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SunsetGold,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GateHoldButton(
+                                icon = Icons.Rounded.LockOpen,
+                                label = "HOLD: OPEN GATE",
+                                accent = EmeraldPulse,
+                                testTag = "btn_hold_open_gate",
+                                onHoldChange = { held -> inputState.holdGateOpen = held }
+                            )
+                            GateHoldButton(
+                                icon = Icons.Rounded.Lock,
+                                label = "HOLD: CLOSE GATE",
+                                accent = SunsetGold,
+                                testTag = "btn_hold_close_gate",
+                                onHoldChange = { held -> inputState.holdGateClose = held }
+                            )
+                        }
+                    }
+                } else {
+                    inputState.holdGateOpen = false
+                    inputState.holdGateClose = false
+                }
+
                 uiState.telemetry.nearbyInteractTarget?.let { hint ->
                     Text(
                         text = hint,
@@ -343,23 +564,37 @@ fun GameplayScreen(
                         color = CityObsidian,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(SunsetGold)
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     )
                 }
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    // Run / Sprint toggle button
-                    ActionCircleButton(
+                    if (uiState.telemetry.vehicleMode == ActiveVehicleMode.CAR) {
+                        TacticalActionButton(
+                            icon = Icons.Rounded.Campaign,
+                            label = "HORN",
+                            highlighted = false,
+                            sizeDp = 56,
+                            testTag = "btn_horn",
+                            onTap = { inputState.hornQueued = true }
+                        )
+                    }
+
+                    TacticalActionButton(
                         icon = Icons.AutoMirrored.Rounded.DirectionsRun,
-                        label = if (sprintToggled) "SPRINT ON" else "RUN",
-                        accent = if (sprintToggled) SunsetGold else ElectricCyan,
-                        filled = sprintToggled,
-                        sizeDp = 62,
+                        label = when {
+                            inVehicle && sprintToggled -> "TURBO"
+                            inVehicle -> "BOOST"
+                            sprintToggled -> "SPRINT"
+                            else -> "RUN"
+                        },
+                        highlighted = sprintToggled,
+                        sizeDp = 58,
                         testTag = "btn_run",
                         onTap = {
                             sprintToggled = !sprintToggled
@@ -367,24 +602,22 @@ fun GameplayScreen(
                         }
                     )
 
-                    // Jump button
-                    ActionCircleButton(
-                        icon = Icons.Rounded.ArrowUpward,
-                        label = "JUMP",
-                        accent = ElectricCyan,
-                        filled = false,
-                        sizeDp = 66,
-                        testTag = "btn_jump",
-                        onTap = { inputState.jumpQueued = true }
-                    )
+                    if (!inVehicle) {
+                        TacticalActionButton(
+                            icon = Icons.Rounded.ArrowUpward,
+                            label = "JUMP",
+                            highlighted = false,
+                            sizeDp = 62,
+                            testTag = "btn_jump",
+                            onTap = { inputState.jumpQueued = true }
+                        )
+                    }
 
-                    // Interact button
-                    ActionCircleButton(
+                    TacticalActionButton(
                         icon = Icons.Rounded.PanTool,
-                        label = "INTERACT",
-                        accent = SunsetGold,
-                        filled = true,
-                        sizeDp = 74,
+                        label = if (inVehicle) "EXIT" else "USE",
+                        highlighted = uiState.telemetry.nearbyInteractTarget != null || inVehicle,
+                        sizeDp = 68,
                         testTag = "btn_interact",
                         onTap = { inputState.interactQueued = true }
                     )
@@ -392,11 +625,26 @@ fun GameplayScreen(
             }
         }
 
-        // 4. Pause Menu Overlay
-        if (uiState.isPaused) {
+        // 4. Fullscreen Interactive Tactical City Map Overlay (Tap MiniMap to explore, zoom, & pin route!)
+        if (isFullMapOpen) {
+            CityMapModal(
+                telemetry = uiState.telemetry,
+                streamingRadiusMeters = uiState.settings.streamingRadiusMeters,
+                waypointX = uiState.waypointX,
+                waypointZ = uiState.waypointZ,
+                onSetWaypoint = onSetWaypoint,
+                onClearWaypoint = onClearWaypoint,
+                onDismiss = { isFullMapOpen = false }
+            )
+        }
+
+        // 5. Pause Menu Overlay
+        if (uiState.isPaused && !isFullMapOpen) {
             PauseMenuOverlay(
                 score = uiState.telemetry.sessionScore,
                 zonesCount = uiState.telemetry.discoveredZoneIds.size,
+                isMuted = uiState.settings.isMuted,
+                onToggleMute = onToggleMute,
                 onResume = onTogglePause,
                 onRestart = { onRestart { glView.cityRenderer.queueReset() } },
                 onReturnToLobby = onReturnToLobby
@@ -409,55 +657,55 @@ fun GameplayScreen(
 private fun HudStatusCard(telemetry: GameTelemetry) {
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(CityObsidian.copy(alpha = 0.78f))
-            .border(1.dp, CityBorder, RoundedCornerShape(14.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(HudDarkGlass)
+            .border(1.dp, HudBorderSubtle, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 7.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 imageVector = Icons.Rounded.Favorite,
                 contentDescription = "Health",
-                tint = CrimsonAlert,
-                modifier = Modifier.size(14.dp)
+                tint = Color.White,
+                modifier = Modifier.size(13.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Box(
                 modifier = Modifier
-                    .width(92.dp)
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(CityCard)
+                    .width(96.dp)
+                    .height(7.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.Black.copy(alpha = 0.45f))
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .fillMaxWidth((telemetry.health / 100f).coerceIn(0f, 1f))
-                        .background(CrimsonAlert)
+                        .background(Color(0xFFECEFF4))
                 )
             }
         }
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(5.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 imageVector = Icons.Rounded.Bolt,
                 contentDescription = "Stamina",
-                tint = ElectricCyan,
-                modifier = Modifier.size(14.dp)
+                tint = SunsetGold,
+                modifier = Modifier.size(13.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Box(
                 modifier = Modifier
-                    .width(92.dp)
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(CityCard)
+                    .width(96.dp)
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.Black.copy(alpha = 0.45f))
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .fillMaxWidth((telemetry.stamina / 100f).coerceIn(0f, 1f))
-                        .background(ElectricCyan)
+                        .background(SunsetGold)
                 )
             }
         }
@@ -468,24 +716,24 @@ private fun HudStatusCard(telemetry: GameTelemetry) {
 private fun HudScoreBadge(score: Int, zonesCount: Int) {
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(CityObsidian.copy(alpha = 0.78f))
-            .border(1.dp, SunsetGold.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(HudDarkGlass)
+            .border(1.dp, HudBorderSubtle, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 imageVector = Icons.Rounded.Star,
                 contentDescription = "Score",
                 tint = SunsetGold,
-                modifier = Modifier.size(15.dp)
+                modifier = Modifier.size(14.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = "$score PTS",
                 style = MaterialTheme.typography.labelLarge,
                 color = TextPrimary,
-                fontSize = 12.sp
+                fontSize = 13.sp
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -493,92 +741,214 @@ private fun HudScoreBadge(score: Int, zonesCount: Int) {
                 imageVector = Icons.Rounded.Explore,
                 contentDescription = "Zones",
                 tint = EmeraldPulse,
-                modifier = Modifier.size(14.dp)
+                modifier = Modifier.size(13.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
-                text = "$zonesCount/5 ZONES",
+                text = "$zonesCount/${CityZones.all.size} ZONES",
                 style = MaterialTheme.typography.labelSmall,
-                color = EmeraldPulse
+                color = TextSecondary,
+                fontSize = 10.sp
             )
         }
     }
 }
 
 @Composable
-private fun MiniMapRadar(telemetry: GameTelemetry) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            modifier = Modifier
-                .size(94.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(CityObsidian.copy(alpha = 0.82f))
-                .border(1.2.dp, ElectricCyan.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
-                .testTag("hud_minimap")
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val half = size.width * 0.5f
-                val worldScale = half / CityWorldData.CITY_HALF_EXTENT
+private fun MiniMapRadar(
+    telemetry: GameTelemetry,
+    streamingRadiusMeters: Float,
+    waypointX: Float?,
+    waypointZ: Float?,
+    onOpenFullMap: () -> Unit
+) {
+    val enterablePreview = remember { CityWorldData.createEnterableBuildings() }
 
-                // Roads on radar
-                val roadColor = Color(0xFF334155)
-                for (r in CityWorldData.roads) {
-                    val left = half + (r.x - r.width * 0.5f) * worldScale
-                    val top = half + (r.z - r.depth * 0.5f) * worldScale
-                    drawRect(
-                        color = roadColor,
-                        topLeft = Offset(left, top),
-                        size = Size(r.width * worldScale, r.depth * worldScale)
-                    )
-                }
+    Box(
+        modifier = Modifier
+            .size(104.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF141921).copy(alpha = 0.88f))
+            .border(1.2.dp, Color.White.copy(alpha = 0.42f), RoundedCornerShape(10.dp))
+            .clickable(onClick = onOpenFullMap)
+            .testTag("hud_minimap")
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val half = size.width * 0.5f
+            val radarRangeMeters = 135f
+            val worldScale = half / radarRangeMeters
+            val pWorldX = telemetry.playerX
+            val pWorldZ = telemetry.playerZ
+            val cullRange = radarRangeMeters + 60f
 
-                // Skyscrapers on radar
-                val bColor = Color(0xFF475569)
-                for (b in CityWorldData.buildings) {
-                    val left = half + (b.x - b.width * 0.5f) * worldScale
-                    val top = half + (b.z - b.depth * 0.5f) * worldScale
-                    drawRect(
-                        color = bColor,
-                        topLeft = Offset(left, top),
-                        size = Size(b.width * worldScale, b.depth * worldScale)
-                    )
-                }
+            fun mapX(wx: Float): Float = half + (wx - pWorldX) * worldScale
+            fun mapZ(wz: Float): Float = half + (wz - pWorldZ) * worldScale
 
-                // Exploration zones
-                for (z in CityZones.all) {
-                    val discovered = telemetry.discoveredZoneIds.contains(z.id)
-                    drawCircle(
-                        color = if (discovered) EmeraldPulse else SunsetGold,
-                        radius = 4.5f,
-                        center = Offset(half + z.x * worldScale, half + z.z * worldScale)
-                    )
-                }
-
-                // Player arrow
-                val px = half + telemetry.playerX * worldScale
-                val pz = half + telemetry.playerZ * worldScale
-                val deg = -(telemetry.playerYawRad * 180f / PI.toFloat()) + 180f
-                rotate(degrees = deg, pivot = Offset(px, pz)) {
-                    val arrow = Path().apply {
-                        moveTo(px, pz - 7f)
-                        lineTo(px + 5f, pz + 5f)
-                        lineTo(px, pz + 2f)
-                        lineTo(px - 5f, pz + 5f)
-                        close()
-                    }
-                    drawPath(arrow, color = ElectricCyan)
-                }
+            // Emerald City Park (-96..-56, 56..96)
+            if (kotlin.math.abs(-76f - pWorldX) < cullRange && kotlin.math.abs(76f - pWorldZ) < cullRange) {
+                drawRect(
+                    color = Color(0xFF1E5128).copy(alpha = 0.72f),
+                    topLeft = Offset(mapX(-96f), mapZ(56f)),
+                    size = Size(40f * worldScale, 40f * worldScale)
+                )
             }
-            Text(
-                text = "N",
-                style = MaterialTheme.typography.labelSmall,
-                color = ElectricCyan,
-                fontSize = 9.sp,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 2.dp)
+
+            // Ocean Bay & Pier (WATERFRONT_Z = 410f)
+            val waterTop = mapZ(CityWorldData.WATERFRONT_Z)
+            if (waterTop < size.height) {
+                val clampedTop = waterTop.coerceAtLeast(0f)
+                drawRect(
+                    color = Color(0xFF1D4E78).copy(alpha = 0.80f),
+                    topLeft = Offset(0f, clampedTop),
+                    size = Size(size.width, (size.height - clampedTop).coerceAtLeast(0f))
+                )
+                drawRect(
+                    color = Color(0xFF9A6B3F),
+                    topLeft = Offset(mapX(-7f), waterTop),
+                    size = Size(14f * worldScale, 36f * worldScale)
+                )
+            }
+
+            // Narrow Colony Alleys ("Patli Galiyan") within radar range
+            val alleyColor = Color(0xFF2D3542)
+            for (al in CityWorldData.colonyAlleys) {
+                if (kotlin.math.abs(al.x - pWorldX) > cullRange || kotlin.math.abs(al.z - pWorldZ) > cullRange) continue
+                val aw = if (al.isVertical) al.width else al.length
+                val ad = if (al.isVertical) al.length else al.width
+                drawRect(
+                    color = alleyColor,
+                    topLeft = Offset(mapX(al.x - aw * 0.5f), mapZ(al.z - ad * 0.5f)),
+                    size = Size(aw * worldScale, ad * worldScale)
+                )
+            }
+
+            // Main Roads & Intersections within tactical radar range
+            val roadColor = Color(0xFF3E4856)
+            for (r in CityWorldData.roadSegments) {
+                if (kotlin.math.abs(r.x - pWorldX) > cullRange + r.length * 0.5f || kotlin.math.abs(r.z - pWorldZ) > cullRange + r.length * 0.5f) continue
+                val rw = if (r.isVertical) r.width else r.length
+                val rd = if (r.isVertical) r.length else r.width
+                drawRect(
+                    color = roadColor,
+                    topLeft = Offset(mapX(r.x - rw * 0.5f), mapZ(r.z - rd * 0.5f)),
+                    size = Size(rw * worldScale, rd * worldScale)
+                )
+            }
+            for (ix in CityWorldData.intersections) {
+                if (kotlin.math.abs(ix.x - pWorldX) > cullRange || kotlin.math.abs(ix.z - pWorldZ) > cullRange) continue
+                drawRect(
+                    color = roadColor,
+                    topLeft = Offset(mapX(ix.x - ix.sizeX * 0.5f), mapZ(ix.z - ix.sizeZ * 0.5f)),
+                    size = Size(ix.sizeX * worldScale, ix.sizeZ * worldScale)
+                )
+            }
+
+            // Buildings within tactical radar range
+            val bColor = Color(0xFF5C6675)
+            for (b in CityWorldData.buildings) {
+                if (kotlin.math.abs(b.x - pWorldX) > cullRange || kotlin.math.abs(b.z - pWorldZ) > cullRange) continue
+                drawRect(
+                    color = bColor,
+                    topLeft = Offset(mapX(b.x - b.width * 0.5f), mapZ(b.z - b.depth * 0.5f)),
+                    size = Size(b.width * worldScale, b.depth * worldScale)
+                )
+            }
+
+            // Enterable Buildings (highlighted gold footprint)
+            for (eb in enterablePreview) {
+                if (kotlin.math.abs(eb.centerX - pWorldX) > cullRange || kotlin.math.abs(eb.centerZ - pWorldZ) > cullRange) continue
+                val left = mapX(eb.centerX - eb.halfW)
+                val top = mapZ(eb.centerZ - eb.halfD)
+                val sz = Size(eb.width * worldScale, eb.depth * worldScale)
+                drawRect(color = SunsetGold.copy(alpha = 0.28f), topLeft = Offset(left, top), size = sz)
+                drawRect(color = SunsetGold, topLeft = Offset(left, top), size = sz, style = Stroke(width = 1.3f))
+            }
+
+            // Player 360-degree Loaded Zone Ring (centered on player!)
+            val zoneRadiusPx = streamingRadiusMeters * worldScale
+            drawCircle(
+                color = Color.White.copy(alpha = 0.08f),
+                radius = zoneRadiusPx,
+                center = Offset(half, half)
             )
+            drawCircle(
+                color = Color.White.copy(alpha = 0.50f),
+                radius = zoneRadiusPx,
+                center = Offset(half, half),
+                style = Stroke(width = 1.1f)
+            )
+
+            // Exploration zones (clamped to radar edge if distant)
+            for (z in CityZones.all) {
+                val discovered = telemetry.discoveredZoneIds.contains(z.id)
+                val dx = (z.x - pWorldX) * worldScale
+                val dz = (z.z - pWorldZ) * worldScale
+                val d = sqrt(dx * dx + dz * dz)
+                val maxEdge = half - 5f
+                val cx = if (d > maxEdge && d > 0.001f) half + (dx / d) * maxEdge else half + dx
+                val cz = if (d > maxEdge && d > 0.001f) half + (dz / d) * maxEdge else half + dz
+                drawCircle(
+                    color = if (discovered) EmeraldPulse else SunsetGold,
+                    radius = if (d > maxEdge) 2.2f else 3.2f,
+                    center = Offset(cx, cz)
+                )
+            }
+
+            // Active Waypoint Dashed Route Line + Pin Tick Mark on Live MiniMap!
+            if (waypointX != null && waypointZ != null) {
+                val dx = (waypointX - pWorldX) * worldScale
+                val dz = (waypointZ - pWorldZ) * worldScale
+                val d = sqrt(dx * dx + dz * dz)
+                val maxEdge = half - 6f
+                val wx = if (d > maxEdge && d > 0.001f) half + (dx / d) * maxEdge else half + dx
+                val wz = if (d > maxEdge && d > 0.001f) half + (dz / d) * maxEdge else half + dz
+                drawLine(
+                    color = SunsetGold,
+                    start = Offset(half, half),
+                    end = Offset(wx, wz),
+                    strokeWidth = 2.0f,
+                    cap = StrokeCap.Round,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(7f, 5f))
+                )
+                drawCircle(color = SunsetGold, radius = 4.6f, center = Offset(wx, wz))
+                drawCircle(color = Color.White, radius = 4.6f, center = Offset(wx, wz), style = Stroke(width = 1.1f))
+            }
+
+            // Player heading arrow (always centered)
+            val deg = -(telemetry.playerYawRad * 180f / PI.toFloat()) + 180f
+            rotate(degrees = deg, pivot = Offset(half, half)) {
+                val arrow = Path().apply {
+                    moveTo(half, half - 6.2f)
+                    lineTo(half + 4.4f, half + 4.4f)
+                    lineTo(half, half + 1.8f)
+                    lineTo(half - 4.4f, half + 4.4f)
+                    close()
+                }
+                drawPath(arrow, color = SunsetGold)
+            }
         }
+        Text(
+            text = "N",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = 0.85f),
+            fontSize = 9.sp,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 2.dp)
+        )
+        Text(
+            text = "MAP",
+            style = MaterialTheme.typography.labelSmall,
+            color = SunsetGold,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 4.dp, bottom = 2.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(Color.Black.copy(alpha = 0.65f))
+                .padding(horizontal = 3.dp, vertical = 1.dp)
+        )
     }
 }
 
@@ -586,8 +956,8 @@ private fun MiniMapRadar(telemetry: GameTelemetry) {
 private fun VirtualJoystick(
     onVectorChange: (Float, Float) -> Unit
 ) {
-    val radiusDp = 56.dp
-    val maxDragPx = with(LocalDensity.current) { 38.dp.toPx() }
+    val radiusDp = 54.dp
+    val maxDragPx = with(LocalDensity.current) { 36.dp.toPx() }
     var knobX by remember { mutableFloatStateOf(0f) }
     var knobY by remember { mutableFloatStateOf(0f) }
 
@@ -596,8 +966,8 @@ private fun VirtualJoystick(
         modifier = Modifier
             .size(radiusDp * 2)
             .clip(CircleShape)
-            .background(CityObsidian.copy(alpha = 0.45f))
-            .border(1.8.dp, ElectricCyan.copy(alpha = 0.55f), CircleShape)
+            .background(HudControlGlass)
+            .border(1.4.dp, Color.White.copy(alpha = 0.34f), CircleShape)
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragEnd = {
@@ -631,10 +1001,10 @@ private fun VirtualJoystick(
         Box(
             modifier = Modifier
                 .offset { IntOffset(knobX.roundToInt(), knobY.roundToInt()) }
-                .size(46.dp)
+                .size(44.dp)
                 .clip(CircleShape)
-                .background(ElectricCyan.copy(alpha = 0.85f))
-                .border(2.dp, Color.White.copy(alpha = 0.8f), CircleShape)
+                .background(Color.White.copy(alpha = 0.78f))
+                .border(2.dp, Color(0xFF1E242E).copy(alpha = 0.55f), CircleShape)
         )
     }
 }
@@ -676,9 +1046,9 @@ private fun DPadKey(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(48.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(CityObsidian.copy(alpha = 0.65f))
-            .border(1.dp, ElectricCyan.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .background(HudControlGlass)
+            .border(1.2.dp, Color.White.copy(alpha = 0.36f), RoundedCornerShape(10.dp))
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -689,20 +1059,23 @@ private fun DPadKey(
                 )
             }
     ) {
-        Icon(imageVector = icon, contentDescription = description, tint = ElectricCyan)
+        Icon(imageVector = icon, contentDescription = description, tint = Color.White)
     }
 }
 
 @Composable
-private fun ActionCircleButton(
+private fun TacticalActionButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
-    accent: Color,
-    filled: Boolean,
+    highlighted: Boolean,
     sizeDp: Int,
     testTag: String,
     onTap: () -> Unit
 ) {
+    val bg = if (highlighted) SunsetGold.copy(alpha = 0.92f) else HudControlGlass
+    val border = if (highlighted) Color(0xFFFFE082) else Color.White.copy(alpha = 0.38f)
+    val contentTint = if (highlighted) CityObsidian else Color.White
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
@@ -710,22 +1083,74 @@ private fun ActionCircleButton(
             .size(sizeDp.dp)
             .minimumInteractiveComponentSize()
             .clip(CircleShape)
-            .background(if (filled) accent else CityObsidian.copy(alpha = 0.72f))
-            .border(1.8.dp, accent, CircleShape)
+            .background(bg)
+            .border(1.5.dp, border, CircleShape)
             .clickable(onClick = onTap)
             .testTag(testTag)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (filled) CityObsidian else accent,
-            modifier = Modifier.size(22.dp)
+            tint = contentTint,
+            modifier = Modifier.size(21.dp)
         )
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = if (filled) CityObsidian else TextPrimary,
+            color = contentTint,
             fontSize = 9.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun GateHoldButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    accent: Color,
+    testTag: String,
+    onHoldChange: (Boolean) -> Unit
+) {
+    var isHeld by remember { mutableStateOf(false) }
+    val bg = if (isHeld) accent.copy(alpha = 0.90f) else HudDarkGlass
+    val border = if (isHeld) Color.White else accent.copy(alpha = 0.78f)
+    val tint = if (isHeld) CityObsidian else Color.White
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .height(48.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .border(1.4.dp, border, RoundedCornerShape(8.dp))
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        isHeld = true
+                        onHoldChange(true)
+                        tryAwaitRelease()
+                        isHeld = false
+                        onHoldChange(false)
+                    }
+                )
+            }
+            .padding(horizontal = 10.dp)
+            .testTag(testTag)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(16.dp)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = tint,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold
         )
     }
@@ -735,6 +1160,8 @@ private fun ActionCircleButton(
 private fun PauseMenuOverlay(
     score: Int,
     zonesCount: Int,
+    isMuted: Boolean,
+    onToggleMute: () -> Unit,
     onResume: () -> Unit,
     onRestart: () -> Unit,
     onReturnToLobby: () -> Unit
@@ -743,7 +1170,7 @@ private fun PauseMenuOverlay(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxSize()
-            .background(CityObsidian.copy(alpha = 0.85f))
+            .background(CityObsidian.copy(alpha = 0.84f))
             .padding(24.dp)
             .testTag("modal_pause")
     ) {
@@ -751,75 +1178,92 @@ private fun PauseMenuOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 380.dp)
-                .clip(RoundedCornerShape(24.dp))
+                .widthIn(max = 360.dp)
+                .clip(RoundedCornerShape(14.dp))
                 .background(CitySlate)
-                .border(1.5.dp, SunsetGold.copy(alpha = 0.6f), RoundedCornerShape(24.dp))
-                .padding(22.dp)
+                .border(1.dp, CityBorder, RoundedCornerShape(14.dp))
+                .padding(20.dp)
         ) {
             Text(
-                text = "GAME PAUSED",
+                text = "PAUSED",
                 style = MaterialTheme.typography.headlineMedium,
                 color = SunsetGold
             )
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Score: $score PTS • Zones: $zonesCount/5",
+                text = "Score: $score PTS  •  Zones: $zonesCount/${CityZones.all.size}",
                 style = MaterialTheme.typography.bodyMedium,
-                color = ElectricCyan
+                color = TextSecondary
             )
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = onResume,
                 colors = ButtonDefaults.buttonColors(containerColor = SunsetGold, contentColor = CityObsidian),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(48.dp)
                     .testTag("btn_resume")
             ) {
                 Icon(Icons.Rounded.PlayArrow, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
                 Text("RESUME", style = MaterialTheme.typography.labelLarge)
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
             OutlinedButton(
-                onClick = onRestart,
-                shape = RoundedCornerShape(14.dp),
-                border = androidx.compose.foundation.BorderStroke(1.2.dp, ElectricCyan),
+                onClick = onToggleMute,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, if (isMuted) CrimsonAlert else SunsetGold.copy(alpha = 0.7f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
+                    .height(48.dp)
+                    .testTag("btn_pause_mute")
+            ) {
+                Icon(
+                    imageVector = if (isMuted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp,
+                    contentDescription = if (isMuted) "Unmute Sound" else "Mute Sound",
+                    tint = if (isMuted) CrimsonAlert else SunsetGold
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isMuted) "SOUND: MUTED" else "SOUND: ON",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (isMuted) CrimsonAlert else TextPrimary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            OutlinedButton(
+                onClick = onRestart,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, CityBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
                     .testTag("btn_restart")
             ) {
-                Icon(Icons.Rounded.Refresh, contentDescription = null, tint = ElectricCyan)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("RESTART EXPLORATION", style = MaterialTheme.typography.labelLarge, color = TextPrimary)
+                Icon(Icons.Rounded.Refresh, contentDescription = null, tint = TextPrimary)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("RESTART", style = MaterialTheme.typography.labelLarge, color = TextPrimary)
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
             OutlinedButton(
                 onClick = onReturnToLobby,
-                shape = RoundedCornerShape(14.dp),
-                border = androidx.compose.foundation.BorderStroke(1.2.dp, CrimsonAlert),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, CrimsonAlert),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
+                    .height(48.dp)
                     .testTag("btn_return_lobby")
             ) {
-                Text("RETURN TO LOBBY", style = MaterialTheme.typography.labelLarge, color = CrimsonAlert)
+                Text("EXIT TO LOBBY", style = MaterialTheme.typography.labelLarge, color = CrimsonAlert)
             }
-
-            Spacer(modifier = Modifier.height(14.dp))
-            Text(
-                text = "Saini Simulator • Ajay Saini (@ajayzsaini)",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
-            )
         }
     }
 }
