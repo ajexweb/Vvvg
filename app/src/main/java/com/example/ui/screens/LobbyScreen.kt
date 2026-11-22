@@ -3,7 +3,6 @@ package com.example.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,26 +23,32 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Assignment
 import androidx.compose.material.icons.rounded.CenterFocusStrong
 import androidx.compose.material.icons.rounded.Diamond
-import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.EmojiEmotions
 import androidx.compose.material.icons.rounded.Face
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.MonetizationOn
+import androidx.compose.material.icons.rounded.NightsStay
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Storefront
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.WaterDrop
+import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,55 +62,77 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.R
 import com.example.game.engine.InteractiveLobbyCharacter3D
 import com.example.game.engine.LobbyCameraPreset
 import com.example.game.engine.LobbyPoseMode
 import com.example.game.model.CharacterSkin
 import com.example.game.model.CityZones
+import com.example.game.model.GameEmotes
+import com.example.game.model.GameVehicleWraps
 import com.example.game.model.LobbyModal
 import com.example.game.model.PlayerProfileStats
+import com.example.game.model.SpawnDistricts
 import com.example.game.viewmodel.GameUiState
-import com.example.ui.theme.CityBorder
+import com.example.ui.components.TacticalAvatar
 import com.example.ui.theme.CityCard
 import com.example.ui.theme.CityObsidian
-import com.example.ui.theme.CitySlate
+import com.example.ui.theme.CoinSilver
 import com.example.ui.theme.CrimsonAlert
 import com.example.ui.theme.DiamondBlue
-import com.example.ui.theme.SunsetAmber
-import com.example.ui.theme.SunsetGold
+import com.example.ui.theme.EmeraldPulse
+import com.example.ui.theme.TacticalAccent
+import com.example.ui.theme.TacticalAccentDark
+import com.example.ui.theme.TacticalCyan
+import com.example.ui.theme.TacticalSilver
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+
+private val LobbyGlass = Color(0xFF0E131C).copy(alpha = 0.80f)
+private val LobbyHairline = Color.White.copy(alpha = 0.14f)
 
 @Composable
 fun LobbyScreen(
     uiState: GameUiState,
-    hasClaimableMissions: Boolean,
     onStartGame: () -> Unit,
     onToggleMute: () -> Unit,
     onOpenModal: (LobbyModal) -> Unit,
     onCloseModal: () -> Unit,
+    onOpenCustomHud: () -> Unit,
+    onCycleSpawnDistrict: (Int) -> Unit,
+    onToggleStartNight: () -> Unit,
+    onToggleStartRain: () -> Unit,
     onSelectSkin: (CharacterSkin) -> Unit
 ) {
     var zoomNormalized by remember { mutableFloatStateOf(LobbyCameraPreset.FULL_BODY.zoomNormalized) }
     var yawDeg by remember { mutableFloatStateOf(12f) }
-    var poseMode by remember { mutableStateOf(LobbyPoseMode.IDLE) }
+    var poseMode by remember { mutableStateOf(LobbyPoseMode.STAND) }
 
     val isCharacterInspectorOpen = uiState.activeModal == LobbyModal.CHARACTERS
-
-    // Smoothly frame character in the left half when Character Inspector opens, and center when closed
     val cameraHorizontalShift = if (isCharacterInspectorOpen) 0.48f else 0f
+
+    // Pause the background 3D lobby OpenGL thread whenever any fullscreen modal or HUD editor covers the lobby!
+    val pauseLobbyGl = (uiState.activeModal != LobbyModal.NONE && !isCharacterInspectorOpen) ||
+        uiState.isCustomHudEditorOpen ||
+        (uiState.isPreferencesLoaded && !uiState.profileStats.hasSetUsername)
 
     LaunchedEffect(isCharacterInspectorOpen) {
         if (!isCharacterInspectorOpen && zoomNormalized > 0.45f) {
             zoomNormalized = LobbyCameraPreset.FULL_BODY.zoomNormalized
         }
+    }
+
+    val activeSpawn = remember(uiState.settings.selectedSpawnId) {
+        SpawnDistricts.byId(uiState.settings.selectedSpawnId)
+    }
+    val activeWrap = remember(uiState.settings.selectedVehicleWrapId) {
+        GameVehicleWraps.byId(uiState.settings.selectedVehicleWrapId)
+    }
+    val activeEmote = remember(uiState.settings.selectedEmoteId) {
+        GameEmotes.byId(uiState.settings.selectedEmoteId)
     }
 
     Box(
@@ -115,19 +141,20 @@ fun LobbyScreen(
             .background(CityObsidian)
             .testTag("lobby_screen")
     ) {
-        // 1. Live Interactive 3D Character Studio Viewport (360-deg Drag Spin + Pinch Zoom + Face Zoom!)
+        // 1. Live Interactive 3D Character Studio Viewport (auto-pauses when modals open to eliminate GPU lag!)
         InteractiveLobbyCharacter3D(
             zoomNormalized = zoomNormalized,
             poseMode = poseMode,
             yawDeg = yawDeg,
             horizontalShift = cameraHorizontalShift,
+            isPaused = pauseLobbyGl,
             onYawChange = { yawDeg = it },
             onZoomChange = { zoomNormalized = it },
             modifier = Modifier.fillMaxSize(),
             testTag = "lobby_3d_character"
         )
 
-        // Subtle cinematic side vignette so HUD labels stay crisp without dimming the character
+        // Subtle side vignette so HUD controls pop crisply
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -143,15 +170,15 @@ fun LobbyScreen(
                 )
         )
 
-        // 2. Main Lobby HUD Overlay (hidden while Character Inspector takes over the right side)
+        // 2. Rich Tactical Open-World Lobby HUD
         if (!isCharacterInspectorOpen) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                // TOP BAR: Player Banner (Left) + Currencies, Sound Toggle & Utility Icons (Right)
+                // TOP STRIP: Player Profile Pill (Left) + Currencies & Utility Icons (Right)
                 LobbyTopBar(
                     stats = uiState.profileStats,
                     isMuted = uiState.settings.isMuted,
@@ -162,79 +189,114 @@ fun LobbyScreen(
                     modifier = Modifier.align(Alignment.TopCenter)
                 )
 
-                // LEFT VERTICAL OFFICIAL GAME MENU RAIL (Free Fire / BGMI style)
+                // LEFT VERTICAL RAIL: Real Menu Actions + Active Loadout Summary
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .padding(top = 14.dp)
+                        .padding(top = 6.dp)
                 ) {
                     LobbySideMenuTile(
                         icon = Icons.Rounded.Storefront,
                         label = "STORE",
-                        accent = SunsetGold,
+                        accent = TacticalAccent,
                         testTag = "btn_lobby_store",
                         onClick = { onOpenModal(LobbyModal.STORE) }
                     )
                     LobbySideMenuTile(
                         icon = Icons.Rounded.Person,
                         label = "CHARACTER",
-                        accent = Color.White,
+                        accent = TacticalCyan,
                         testTag = "btn_lobby_characters",
                         onClick = { onOpenModal(LobbyModal.CHARACTERS) }
                     )
                     LobbySideMenuTile(
-                        icon = Icons.Rounded.Assignment,
-                        label = "MISSIONS",
-                        accent = Color.White,
-                        showBadgeDot = hasClaimableMissions,
-                        testTag = "btn_lobby_missions",
-                        onClick = { onOpenModal(LobbyModal.MISSIONS) }
+                        icon = Icons.Rounded.Tune,
+                        label = "HUD LAYOUT",
+                        accent = EmeraldPulse,
+                        testTag = "btn_lobby_hud",
+                        onClick = onOpenCustomHud
+                    )
+                    LobbySideMenuTile(
+                        icon = Icons.Rounded.Settings,
+                        label = "SETTINGS",
+                        accent = TacticalSilver,
+                        testTag = "btn_lobby_settings_rail",
+                        onClick = { onOpenModal(LobbyModal.SETTINGS) }
                     )
                 }
 
-                // BOTTOM-LEFT: Active Outfit + Creator Credit (subtle & official)
+                // BOTTOM-LEFT: Active Real Loadout Card (Vehicle Wrap + 3D Emote + Graphics)
                 Column(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.align(Alignment.BottomStart)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(CityObsidian.copy(alpha = 0.72f))
-                            .border(1.dp, CityBorder.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
-                            .clickable { onOpenModal(LobbyModal.CHARACTERS) }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                            .width(156.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(LobbyGlass)
+                            .border(0.8.dp, LobbyHairline, RoundedCornerShape(5.dp))
+                            .clickable { onOpenModal(LobbyModal.STORE) }
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                            .testTag("lobby_loadout_card")
                     ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(9.dp)
+                                    .clip(CircleShape)
+                                    .background(activeWrap.swatchColor)
+                                    .border(0.6.dp, Color.White.copy(alpha = 0.6f), CircleShape)
+                            )
+                            Icon(Icons.Rounded.DirectionsCar, contentDescription = null, tint = TacticalCyan, modifier = Modifier.size(11.dp))
+                            Text(
+                                text = activeWrap.name,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextPrimary,
+                                fontSize = 9.sp,
+                                maxLines = 1
+                            )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(Icons.Rounded.EmojiEmotions, contentDescription = null, tint = EmeraldPulse, modifier = Modifier.size(11.dp))
+                            Text(
+                                text = "Emote: ${activeEmote.shortLabel}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary,
+                                fontSize = 9.sp,
+                                maxLines = 1
+                            )
+                        }
                         Text(
-                            text = uiState.selectedSkin.name.uppercase(),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = TextPrimary,
-                            fontSize = 13.sp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = uiState.selectedSkin.badgeLabel,
+                            text = "${uiState.settings.graphicsQuality.label.uppercase()} • ${uiState.settings.targetFps} FPS • ${uiState.settings.renderResolution.label}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = SunsetGold,
-                            fontSize = 10.sp
+                            color = TacticalCyan,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
 
                     Text(
-                        text = "SAINI SIMULATOR • BY AJAY SAINI (@ajayzsaini)",
+                        text = "SAINI SIMULATOR • AJAY SAINI (@ajayzsaini)",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary.copy(alpha = 0.85f),
-                        fontSize = 10.sp,
+                        color = TextSecondary.copy(alpha = 0.78f),
+                        fontSize = 8.sp,
                         modifier = Modifier
                             .clickable { onOpenModal(LobbyModal.CREDITS) }
-                            .padding(horizontal = 2.dp, vertical = 2.dp)
+                            .padding(horizontal = 2.dp, vertical = 1.dp)
                             .testTag("lobby_developer_badge")
                     )
                 }
 
-                // BOTTOM-CENTER: Quick 3D Camera Zoom & Face Zoom Bar right in Lobby!
+                // BOTTOM-CENTER: 3D Character Camera & Animation Pose Strip
                 LobbyQuickCameraBar(
                     zoomNormalized = zoomNormalized,
                     poseMode = poseMode,
@@ -246,72 +308,177 @@ fun LobbyScreen(
                         zoomNormalized = (zoomNormalized + delta).coerceIn(0f, 1f)
                     },
                     onCyclePose = {
-                        poseMode = when (poseMode) {
-                            LobbyPoseMode.IDLE -> LobbyPoseMode.WALK
-                            LobbyPoseMode.WALK -> LobbyPoseMode.SPRINT
-                            LobbyPoseMode.SPRINT -> LobbyPoseMode.IDLE
-                        }
+                        val all = LobbyPoseMode.entries
+                        poseMode = all[(poseMode.ordinal + 1) % all.size]
                     },
                     onResetView = {
                         zoomNormalized = LobbyCameraPreset.FULL_BODY.zoomNormalized
                         yawDeg = 12f
-                        poseMode = LobbyPoseMode.IDLE
+                        poseMode = LobbyPoseMode.STAND
                     },
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
 
-                // BOTTOM-RIGHT: Map/Mode Selector Card + Iconic Golden START Button
+                // RIGHT & BOTTOM-RIGHT: Real Deployment Selector (Spawn District + Time/Weather + START)
                 Column(
                     horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
                     modifier = Modifier.align(Alignment.BottomEnd)
                 ) {
-                    // Mode / Map Selection Banner
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    // Spawn Point Selector (choose any major Saini State district before deploying!)
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
                         modifier = Modifier
-                            .width(204.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(CitySlate.copy(alpha = 0.88f))
-                            .border(1.dp, CityBorder, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .width(174.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(LobbyGlass)
+                            .border(0.8.dp, LobbyHairline, RoundedCornerShape(5.dp))
+                            .padding(horizontal = 7.dp, vertical = 5.dp)
+                            .testTag("lobby_spawn_selector")
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Explore,
-                            contentDescription = null,
-                            tint = SunsetGold,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.LocationOn, contentDescription = null, tint = TacticalCyan, modifier = Modifier.size(11.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "DEPLOY ZONE",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TacticalCyan,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.7.sp
+                                )
+                            }
                             Text(
-                                text = "SAINI CITY",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = TextPrimary,
-                                fontSize = 14.sp
-                            )
-                            Text(
-                                text = "OPEN WORLD • ${uiState.profileStats.zonesDiscoveredTotal}/${CityZones.all.size} ZONES",
+                                text = activeSpawn.regionTag,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextSecondary,
-                                fontSize = 10.sp
+                                fontSize = 7.sp
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(CityCard)
+                                    .clickable { onCycleSpawnDistrict(-1) }
+                                    .testTag("btn_spawn_prev")
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Previous Spawn", tint = TextPrimary, modifier = Modifier.size(16.dp))
+                            }
+
+                            Text(
+                                text = activeSpawn.name,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextPrimary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(CityCard)
+                                    .clickable { onCycleSpawnDistrict(1) }
+                                    .testTag("btn_spawn_next")
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Next Spawn", tint = TextPrimary, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    // Quick Starting Environment Toggles (DAY/NIGHT + CLEAR/RAIN)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.width(174.dp)
+                    ) {
+                        val isNight = uiState.settings.startNightMode
+                        val isRain = uiState.settings.startRainMode
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(26.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(if (isNight) TacticalCyan.copy(alpha = 0.22f) else LobbyGlass)
+                                .border(0.8.dp, if (isNight) TacticalCyan else LobbyHairline, RoundedCornerShape(4.dp))
+                                .clickable(onClick = onToggleStartNight)
+                                .testTag("btn_lobby_time")
+                        ) {
+                            Icon(
+                                imageVector = if (isNight) Icons.Rounded.NightsStay else Icons.Rounded.WbSunny,
+                                contentDescription = "Start Time",
+                                tint = if (isNight) TacticalCyan else TacticalSilver,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isNight) "NIGHT" else "DAY",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isNight) TacticalCyan else TextPrimary,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(26.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(if (isRain) TacticalCyan.copy(alpha = 0.22f) else LobbyGlass)
+                                .border(0.8.dp, if (isRain) TacticalCyan else LobbyHairline, RoundedCornerShape(4.dp))
+                                .clickable(onClick = onToggleStartRain)
+                                .testTag("btn_lobby_weather")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.WaterDrop,
+                                contentDescription = "Start Weather",
+                                tint = if (isRain) TacticalCyan else TextSecondary,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isRain) "RAIN" else "CLEAR",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isRain) TacticalCyan else TextPrimary,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
 
-                    // Iconic Free Fire / BGMI Bold Golden START Button
+                    // Primary Crimson START Button
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .width(204.dp)
-                            .height(54.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .width(174.dp)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(4.dp))
                             .background(
                                 Brush.horizontalGradient(
-                                    colors = listOf(SunsetGold, SunsetAmber)
+                                    colors = listOf(TacticalAccent, TacticalAccentDark)
                                 )
                             )
-                            .border(1.5.dp, Color(0xFFFFE082), RoundedCornerShape(8.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(4.dp))
                             .clickable(onClick = onStartGame)
                             .testTag("btn_start_game")
                     ) {
@@ -322,23 +489,22 @@ fun LobbyScreen(
                             Icon(
                                 imageVector = Icons.Rounded.PlayArrow,
                                 contentDescription = null,
-                                tint = CityObsidian,
-                                modifier = Modifier.size(26.dp)
+                                tint = TextPrimary,
+                                modifier = Modifier.size(19.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "START",
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = CityObsidian,
-                                fontSize = 24.sp,
-                                letterSpacing = 2.sp
+                                text = "START GAME",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = TextPrimary,
+                                fontSize = 15.sp,
+                                letterSpacing = 1.4.sp
                             )
                         }
                     }
                 }
             }
         } else {
-            // 3. Dedicated Split-Screen 3D Character Inspector (Full Body / Upper / Face Zoom + Outfits + Stats)
             CharacterInspectorOverlay(
                 uiState = uiState,
                 zoomNormalized = zoomNormalized,
@@ -352,7 +518,7 @@ fun LobbyScreen(
                 onResetCamera = {
                     zoomNormalized = LobbyCameraPreset.FULL_BODY.zoomNormalized
                     yawDeg = 12f
-                    poseMode = LobbyPoseMode.IDLE
+                    poseMode = LobbyPoseMode.STAND
                 },
                 onSelectSkin = onSelectSkin,
                 onOpenStore = { onOpenModal(LobbyModal.STORE) },
@@ -360,7 +526,7 @@ fun LobbyScreen(
             )
         }
 
-        // Floating Lobby Toast Notification (Purchase / Equip / Claim Feedback)
+        // Compact Floating Lobby Toast
         AnimatedVisibility(
             visible = uiState.lobbyToast != null,
             enter = fadeIn(),
@@ -368,20 +534,21 @@ fun LobbyScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(top = 64.dp)
+                .padding(top = 46.dp)
         ) {
             uiState.lobbyToast?.let { toast ->
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(4.dp))
                         .background(CityObsidian.copy(alpha = 0.92f))
-                        .border(1.dp, SunsetGold, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .border(0.8.dp, TacticalCyan, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 12.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = toast,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = SunsetGold
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextPrimary,
+                        fontSize = 11.sp
                     )
                 }
             }
@@ -404,71 +571,54 @@ private fun LobbyTopBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Tactical Player Banner (Avatar + Name + Level + Rank)
+        // Player Profile Pill (Tactical Avatar + Username + Discovered Zones)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(CitySlate.copy(alpha = 0.88f))
-                .border(1.dp, CityBorder, RoundedCornerShape(8.dp))
+                .height(36.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(LobbyGlass)
+                .border(0.8.dp, LobbyHairline, RoundedCornerShape(4.dp))
                 .clickable(onClick = onProfileClick)
-                .padding(start = 6.dp, end = 14.dp, top = 5.dp, bottom = 5.dp)
+                .padding(start = 4.dp, end = 10.dp)
                 .testTag("btn_profile")
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.img_player_face),
-                contentDescription = "Player Avatar",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .border(1.5.dp, SunsetGold, RoundedCornerShape(6.dp))
+            TacticalAvatar(
+                avatarId = stats.selectedAvatarId,
+                size = 28.dp,
+                cornerRadius = 3.dp,
+                borderWidth = 1.dp
             )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "AJAY SAINI",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = TextPrimary,
-                        fontSize = 16.sp,
-                        modifier = Modifier.testTag("lobby_title")
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(SunsetGold)
-                            .padding(horizontal = 5.dp, vertical = 1.dp)
-                    ) {
-                        Text(
-                            text = "LV.${stats.level}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = CityObsidian,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+            Spacer(modifier = Modifier.width(7.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
-                    text = stats.explorerRank,
+                    text = stats.playerName.ifBlank { "SAINI PLAYER" }.uppercase(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextPrimary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    modifier = Modifier.testTag("lobby_title")
+                )
+                Text(
+                    text = "${stats.zonesDiscoveredTotal}/${CityZones.all.size} ZONES • PROFILE",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
-                    fontSize = 11.sp
+                    color = TacticalCyan,
+                    fontSize = 8.sp
                 )
             }
         }
 
-        // Right: Gold Coins + Diamonds + Quick Sound Toggle + Settings + Credits
+        // Right: Currencies + Utility Icons
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             CurrencyChip(
                 icon = Icons.Rounded.MonetizationOn,
                 value = stats.coins.toString(),
-                tint = SunsetGold,
-                contentDescription = "Gold Coins"
+                tint = CoinSilver,
+                contentDescription = "Coins"
             )
             CurrencyChip(
                 icon = Icons.Rounded.Diamond,
@@ -480,7 +630,7 @@ private fun LobbyTopBar(
                 icon = if (isMuted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp,
                 contentDescription = if (isMuted) "Unmute Sound" else "Mute Sound",
                 testTag = "btn_lobby_mute",
-                tint = if (isMuted) CrimsonAlert else SunsetGold,
+                tint = if (isMuted) CrimsonAlert else TacticalSilver,
                 onClick = onToggleMute
             )
             TopIconSquareButton(
@@ -491,7 +641,7 @@ private fun LobbyTopBar(
             )
             TopIconSquareButton(
                 icon = Icons.Rounded.Info,
-                contentDescription = "Credits",
+                contentDescription = "About",
                 testTag = "btn_credits_top",
                 onClick = onCreditsClick
             )
@@ -509,24 +659,24 @@ private fun CurrencyChip(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .height(38.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(CitySlate.copy(alpha = 0.88f))
-            .border(1.dp, CityBorder, RoundedCornerShape(6.dp))
-            .padding(horizontal = 10.dp)
+            .height(28.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(LobbyGlass)
+            .border(0.8.dp, LobbyHairline, RoundedCornerShape(4.dp))
+            .padding(horizontal = 7.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = tint,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(13.dp)
         )
-        Spacer(modifier = Modifier.width(5.dp))
+        Spacer(modifier = Modifier.width(4.dp))
         Text(
             text = value,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelMedium,
             color = TextPrimary,
-            fontSize = 15.sp
+            fontSize = 12.sp
         )
     }
 }
@@ -542,11 +692,10 @@ private fun TopIconSquareButton(
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(48.dp)
-            .minimumInteractiveComponentSize()
-            .clip(RoundedCornerShape(8.dp))
-            .background(CitySlate.copy(alpha = 0.88f))
-            .border(1.dp, CityBorder, RoundedCornerShape(8.dp))
+            .size(32.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(LobbyGlass)
+            .border(0.8.dp, LobbyHairline, RoundedCornerShape(4.dp))
             .clickable(onClick = onClick)
             .testTag(testTag)
     ) {
@@ -554,7 +703,7 @@ private fun TopIconSquareButton(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = tint,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(16.dp)
         )
     }
 }
@@ -564,47 +713,43 @@ private fun LobbySideMenuTile(
     icon: ImageVector,
     label: String,
     accent: Color,
-    showBadgeDot: Boolean = false,
     testTag: String,
     onClick: () -> Unit
 ) {
-    Box {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .width(106.dp)
+            .height(32.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(LobbyGlass)
+            .border(0.8.dp, LobbyHairline, RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp)
+            .testTag(testTag)
+    ) {
+        Box(
             modifier = Modifier
-                .width(136.dp)
-                .height(48.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(CitySlate.copy(alpha = 0.84f))
-                .border(1.dp, CityBorder.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
-                .clickable(onClick = onClick)
-                .padding(horizontal = 12.dp)
-                .testTag(testTag)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = accent,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                color = TextPrimary,
-                fontSize = 14.sp
-            )
-        }
-        if (showBadgeDot) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .size(9.dp)
-                    .clip(CircleShape)
-                    .background(CrimsonAlert)
-            )
-        }
+                .width(2.5.dp)
+                .height(14.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(accent)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = TextPrimary,
+            modifier = Modifier.size(14.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = TextPrimary,
+            fontSize = 10.sp,
+            letterSpacing = 0.5.sp
+        )
     }
 }
 
@@ -620,12 +765,12 @@ private fun LobbyQuickCameraBar(
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(CityObsidian.copy(alpha = 0.78f))
-            .border(1.dp, CityBorder.copy(alpha = 0.75f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 8.dp, vertical = 5.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(LobbyGlass)
+            .border(0.8.dp, LobbyHairline, RoundedCornerShape(6.dp))
+            .padding(horizontal = 5.dp, vertical = 3.dp)
             .testTag("lobby_camera_bar")
     ) {
         val isFaceZoom = zoomNormalized >= 0.78f
@@ -646,60 +791,58 @@ private fun LobbyQuickCameraBar(
             onClick = { onSelectPreset(LobbyCameraPreset.FACE_ZOOM) }
         )
 
-        // Step Zoom Out / In buttons
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(34.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .size(24.dp)
+                .clip(RoundedCornerShape(4.dp))
                 .background(CityCard)
                 .clickable { onStepZoom(-0.22f) }
                 .testTag("btn_zoom_out")
         ) {
-            Icon(Icons.Rounded.Remove, contentDescription = "Zoom Out", tint = TextPrimary, modifier = Modifier.size(18.dp))
+            Icon(Icons.Rounded.Remove, contentDescription = "Zoom Out", tint = TextPrimary, modifier = Modifier.size(14.dp))
         }
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(34.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .size(24.dp)
+                .clip(RoundedCornerShape(4.dp))
                 .background(CityCard)
                 .clickable { onStepZoom(0.22f) }
                 .testTag("btn_zoom_in")
         ) {
-            Icon(Icons.Rounded.Add, contentDescription = "Zoom In", tint = TextPrimary, modifier = Modifier.size(18.dp))
+            Icon(Icons.Rounded.Add, contentDescription = "Zoom In", tint = TextPrimary, modifier = Modifier.size(14.dp))
         }
 
-        // Pose toggle
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .height(34.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .height(24.dp)
+                .clip(RoundedCornerShape(4.dp))
                 .background(CityCard)
                 .clickable(onClick = onCyclePose)
-                .padding(horizontal = 10.dp)
+                .padding(horizontal = 7.dp)
                 .testTag("btn_lobby_pose")
         ) {
             Text(
                 text = poseMode.label,
                 style = MaterialTheme.typography.labelSmall,
-                color = SunsetGold,
+                color = TacticalCyan,
+                fontSize = 9.sp,
                 fontWeight = FontWeight.Bold
             )
         }
 
-        // Reset camera angle
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(34.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .size(24.dp)
+                .clip(RoundedCornerShape(4.dp))
                 .background(CityCard)
                 .clickable(onClick = onResetView)
                 .testTag("btn_reset_cam")
         ) {
-            Icon(Icons.Rounded.Refresh, contentDescription = "Reset Camera", tint = TextSecondary, modifier = Modifier.size(17.dp))
+            Icon(Icons.Rounded.Refresh, contentDescription = "Reset Camera", tint = TextSecondary, modifier = Modifier.size(13.dp))
         }
     }
 }
@@ -715,24 +858,25 @@ private fun QuickCamChip(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .height(34.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(if (active) SunsetGold else CityCard)
+            .height(24.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(if (active) TacticalCyan else CityCard)
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp)
+            .padding(horizontal = 7.dp)
             .testTag(testTag)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
             tint = if (active) CityObsidian else TextPrimary,
-            modifier = Modifier.size(15.dp)
+            modifier = Modifier.size(12.dp)
         )
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(3.dp))
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = if (active) CityObsidian else TextPrimary,
+            fontSize = 9.sp,
             fontWeight = FontWeight.Bold
         )
     }

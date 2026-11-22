@@ -59,6 +59,7 @@ class CityShaderProgram {
 
     init {
         val vertexCode = """
+            precision highp float;
             uniform mat4 uMvpMatrix;
             uniform mat4 uModelMatrix;
             uniform vec2 uTexScale;
@@ -69,11 +70,14 @@ class CityShaderProgram {
             varying vec3 vWorldNormal;
             varying vec3 vWorldPos;
             varying vec2 vTexCoord;
+            varying vec2 vTexOffset;
             void main() {
                 vec4 worldPos = uModelMatrix * vec4(aPosition, 1.0);
                 vWorldPos = worldPos.xyz;
-                vWorldNormal = normalize(mat3(uModelMatrix) * aNormal);
+                vec3 wn = (uModelMatrix * vec4(aNormal, 0.0)).xyz;
+                vWorldNormal = normalize(wn + vec3(0.0, 0.0001, 0.0));
                 vTexCoord = aTexCoord * uTexScale + uTexOffset;
+                vTexOffset = uTexOffset;
                 gl_Position = uMvpMatrix * vec4(aPosition, 1.0);
             }
         """.trimIndent()
@@ -83,7 +87,6 @@ class CityShaderProgram {
             uniform sampler2D uTexture;
             uniform sampler2D uNormalTex;
             uniform float uNormalStrength;
-            uniform vec2 uTexOffset;
             uniform vec4 uColorTint;
             uniform float uEmissive;
             uniform float uSpecStrength;
@@ -101,6 +104,7 @@ class CityShaderProgram {
             varying vec3 vWorldNormal;
             varying vec3 vWorldPos;
             varying vec2 vTexCoord;
+            varying vec2 vTexOffset;
 
             vec3 acesFilm(vec3 x) {
                 return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
@@ -114,8 +118,8 @@ class CityShaderProgram {
                 vec3 baseColor = texel.rgb * uColorTint.rgb;
                 vec3 n = normalize(vWorldNormal);
                 if (uNormalStrength > 0.01) {
-                    vec3 nm1 = texture2D(uNormalTex, vTexCoord * 1.15 + uTexOffset * 0.45).rgb * 2.0 - 1.0;
-                    vec3 nm2 = texture2D(uNormalTex, vTexCoord * 1.75 - uTexOffset * 0.85).rgb * 2.0 - 1.0;
+                    vec3 nm1 = texture2D(uNormalTex, vTexCoord * 1.15 + vTexOffset * 0.45).rgb * 2.0 - 1.0;
+                    vec3 nm2 = texture2D(uNormalTex, vTexCoord * 1.75 - vTexOffset * 0.85).rgb * 2.0 - 1.0;
                     vec3 ripple = normalize(vec3((nm1.x + nm2.x) * uNormalStrength, 1.0, (nm1.y + nm2.y) * uNormalStrength));
                     n = normalize(mix(n, ripple, clamp(uNormalStrength, 0.0, 0.85)));
                 }
@@ -158,6 +162,11 @@ class CityShaderProgram {
             GLES20.glAttachShader(prog, vShader)
             GLES20.glAttachShader(prog, fShader)
             GLES20.glLinkProgram(prog)
+            val linkStatus = IntArray(1)
+            GLES20.glGetProgramiv(prog, GLES20.GL_LINK_STATUS, linkStatus, 0)
+            if (linkStatus[0] == 0) {
+                android.util.Log.e("CityShaderProgram", "Link failed: ${GLES20.glGetProgramInfoLog(prog)}")
+            }
         }
         GLES20.glDeleteShader(vShader)
         GLES20.glDeleteShader(fShader)
@@ -193,6 +202,11 @@ class CityShaderProgram {
         return GLES20.glCreateShader(type).also { shader ->
             GLES20.glShaderSource(shader, code)
             GLES20.glCompileShader(shader)
+            val status = IntArray(1)
+            GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, status, 0)
+            if (status[0] == 0) {
+                android.util.Log.e("CityShaderProgram", "Shader compile failed: ${GLES20.glGetShaderInfoLog(shader)}")
+            }
         }
     }
 }
@@ -296,30 +310,63 @@ class GlMesh(vertices: FloatArray) {
 }
 
 object GlTextureHelper {
+    private fun isPowerOfTwo(v: Int): Boolean = v > 0 && (v and (v - 1)) == 0
+
+    private fun computePowerOfTwoSampleSize(outW: Int, outH: Int, maxDim: Int): Int {
+        var sample = 1
+        var w = outW
+        var h = outH
+        while (w > maxDim || h > maxDim) {
+            sample *= 2
+            w /= 2
+            h /= 2
+        }
+        return sample
+    }
+
     fun loadDrawableTexture(
         context: Context,
         @DrawableRes resId: Int,
         repeat: Boolean = true,
-        repeatY: Boolean = repeat
+        repeatY: Boolean = repeat,
+        maxDim: Int = 512
     ): Int {
         val texIds = IntArray(1)
         GLES20.glGenTextures(1, texIds, 0)
         val texId = texIds[0]
 
-        val options = BitmapFactory.Options().apply { inScaled = false }
+        val bounds = BitmapFactory.Options().apply {
+            inScaled = false
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeResource(context.resources, resId, bounds)
+        val sample = if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+            computePowerOfTwoSampleSize(bounds.outWidth, bounds.outHeight, maxDim)
+        } else 1
+
+        val options = BitmapFactory.Options().apply {
+            inScaled = false
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
         val bitmap = BitmapFactory.decodeResource(context.resources, resId, options)
 
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
-        val wrapS = if (repeat) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
-        val wrapT = if (repeatY) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
+        val isPot = bitmap != null && isPowerOfTwo(bitmap.width) && isPowerOfTwo(bitmap.height)
+        val wrapS = if (repeat && isPot) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
+        val wrapT = if (repeatY && isPot) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, wrapS)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, wrapT)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR_MIPMAP_LINEAR)
+        GLES20.glTexParameteri(
+            GLES20.GL_TEXTURE_2D,
+            GLES20.GL_TEXTURE_MIN_FILTER,
+            if (isPot) GLES20.GL_LINEAR_MIPMAP_LINEAR else GLES20.GL_LINEAR
+        )
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
 
         if (bitmap != null) {
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
-            GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+            if (isPot) GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
             bitmap.recycle()
         }
         return texId
@@ -344,20 +391,36 @@ object GlTextureHelper {
 
     /**
      * Loads a texture from app/src/main/assets/ with full RGBA transparency support,
-     * trilinear mipmapping, and hardware anisotropic filtering when supported.
+     * automatic mobile VRAM downsampling (max 512px), power-of-two safe trilinear mipmapping,
+     * and hardware anisotropic filtering when supported.
      */
     fun loadAssetTexture(
         context: Context,
         assetPath: String,
         repeat: Boolean = false,
-        repeatY: Boolean = repeat
+        repeatY: Boolean = repeat,
+        maxDim: Int = 512
     ): Int {
         val texIds = IntArray(1)
         GLES20.glGenTextures(1, texIds, 0)
         val texId = texIds[0]
 
+        val sample = runCatching {
+            val bounds = BitmapFactory.Options().apply {
+                inScaled = false
+                inJustDecodeBounds = true
+            }
+            context.assets.open(assetPath).use { stream ->
+                BitmapFactory.decodeStream(stream, null, bounds)
+            }
+            if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+                computePowerOfTwoSampleSize(bounds.outWidth, bounds.outHeight, maxDim)
+            } else 1
+        }.getOrDefault(1)
+
         val options = BitmapFactory.Options().apply {
             inScaled = false
+            inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
         val bitmap = runCatching {
@@ -367,11 +430,16 @@ object GlTextureHelper {
         }.getOrNull()
 
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
-        val wrapS = if (repeat) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
-        val wrapT = if (repeatY) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
+        val isPot = bitmap != null && isPowerOfTwo(bitmap.width) && isPowerOfTwo(bitmap.height)
+        val wrapS = if (repeat && isPot) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
+        val wrapT = if (repeatY && isPot) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, wrapS)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, wrapT)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR_MIPMAP_LINEAR)
+        GLES20.glTexParameteri(
+            GLES20.GL_TEXTURE_2D,
+            GLES20.GL_TEXTURE_MIN_FILTER,
+            if (isPot) GLES20.GL_LINEAR_MIPMAP_LINEAR else GLES20.GL_LINEAR
+        )
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
 
         val maxAniso = queryMaxAnisotropy()
@@ -381,7 +449,7 @@ object GlTextureHelper {
 
         if (bitmap != null) {
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
-            GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+            if (isPot) GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
             bitmap.recycle()
         }
         return texId

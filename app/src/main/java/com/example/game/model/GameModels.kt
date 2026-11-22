@@ -16,21 +16,38 @@ enum class LobbyModal {
     NONE,
     CHARACTERS,
     STORE,
-    MISSIONS,
     PROFILE,
     SETTINGS,
     CREDITS
 }
 
 enum class GraphicsQuality(val label: String, val fogEnd: Float, val propDensity: Int) {
-    LOW("Low", 95f, 1),
-    MEDIUM("Medium", 135f, 2),
-    HIGH("High", 185f, 3)
+    LOW("Low", 92f, 1),
+    MEDIUM("Medium", 132f, 2),
+    HIGH("High", 180f, 3)
 }
 
 enum class ControlLayout(val label: String) {
     JOYSTICK("Joystick"),
     DPAD("D-Pad")
+}
+
+enum class VehicleControlMode(val label: String) {
+    BUTTONS("Buttons"),
+    JOYSTICK("Joystick")
+}
+
+enum class DensityLevel(val label: String) {
+    OFF("Off"),
+    LOW("Low"),
+    MEDIUM("Med"),
+    HIGH("High")
+}
+
+enum class RenderResolution(val label: String, val scale: Float) {
+    PERFORMANCE_75("75%", 0.75f),
+    BALANCED_85("85%", 0.85f),
+    NATIVE_100("100%", 1.0f)
 }
 
 data class CharacterSkin(
@@ -48,18 +65,21 @@ data class CharacterSkin(
     val accentColorRgb: FloatArray,
     val previewAccent: Color,
     val badgeLabel: String,
-    val agilityRating: Float = 0.78f,
-    val staminaRating: Float = 0.82f,
-    val drivingRating: Float = 0.80f
+    val agilityRating: Float = 0.84f,
+    val staminaRating: Float = 0.88f,
+    val drivingRating: Float = 0.86f
 )
 
+/**
+ * Only the REAL rigged 3D Ajay Saini character model (zero fake unrendered outfits!).
+ */
 object GameSkins {
     val all: List<CharacterSkin> = listOf(
         CharacterSkin(
             id = "urban_explorer",
-            name = "Ajay Street Hoodie",
-            subtitle = "Black Tactical Hoodie, Slim Denim & White Sneakers",
-            perkDescription = "Balanced handling & steady stamina recovery",
+            name = "Ajay Saini",
+            subtitle = "Rigged 3D Street Hoodie, Slim Denim & Low-Top Sneakers",
+            perkDescription = "Full 6-Animation Rig (Stand, Run, Punch, Kick, Flip, Drop)",
             speedMultiplier = 1.0f,
             skinToneRgb = floatArrayOf(0.84f, 0.65f, 0.50f),
             hairColorRgb = floatArrayOf(0.11f, 0.09f, 0.08f),
@@ -67,88 +87,162 @@ object GameSkins {
             jacketColorRgb = floatArrayOf(0.14f, 0.16f, 0.20f),
             pantsColorRgb = floatArrayOf(0.14f, 0.16f, 0.20f),
             shoeColorRgb = floatArrayOf(0.94f, 0.94f, 0.96f),
-            accentColorRgb = floatArrayOf(1.0f, 0.72f, 0.05f),
-            previewAccent = Color(0xFFFFB800),
-            badgeLabel = "DEFAULT",
-            agilityRating = 0.78f,
-            staminaRating = 0.82f,
-            drivingRating = 0.80f
-        ),
-        CharacterSkin(
-            id = "saini_streetwear",
-            name = "Crimson Striker",
-            subtitle = "Red Tactical Streetwear & Black Joggers",
-            perkDescription = "+12% Sprint Agility across city streets",
-            speedMultiplier = 1.12f,
-            skinToneRgb = floatArrayOf(0.82f, 0.62f, 0.47f),
-            hairColorRgb = floatArrayOf(0.08f, 0.07f, 0.07f),
-            shirtColorRgb = floatArrayOf(0.16f, 0.16f, 0.18f),
-            jacketColorRgb = floatArrayOf(0.76f, 0.13f, 0.18f),
-            pantsColorRgb = floatArrayOf(0.13f, 0.14f, 0.17f),
-            shoeColorRgb = floatArrayOf(0.90f, 0.18f, 0.22f),
-            accentColorRgb = floatArrayOf(0.96f, 0.96f, 0.98f),
-            previewAccent = Color(0xFFEF4444),
-            badgeLabel = "RARE",
-            agilityRating = 0.90f,
-            staminaRating = 0.86f,
-            drivingRating = 0.82f
-        ),
-        CharacterSkin(
-            id = "metro_tactical",
-            name = "Bullet Rider",
-            subtitle = "Heavy Biker Leather Jacket & Riding Boots",
-            perkDescription = "+10% Speed & Enhanced Vehicle Handling",
-            speedMultiplier = 1.10f,
-            skinToneRgb = floatArrayOf(0.86f, 0.67f, 0.53f),
-            hairColorRgb = floatArrayOf(0.14f, 0.10f, 0.08f),
-            shirtColorRgb = floatArrayOf(0.76f, 0.80f, 0.86f),
-            jacketColorRgb = floatArrayOf(0.12f, 0.13f, 0.16f),
-            pantsColorRgb = floatArrayOf(0.15f, 0.18f, 0.23f),
-            shoeColorRgb = floatArrayOf(0.18f, 0.18f, 0.20f),
-            accentColorRgb = floatArrayOf(0.88f, 0.90f, 0.94f),
-            previewAccent = Color(0xFF64748B),
-            badgeLabel = "EPIC",
-            agilityRating = 0.86f,
-            staminaRating = 0.88f,
-            drivingRating = 0.96f
-        ),
-        CharacterSkin(
-            id = "golden_legend",
-            name = "Saini VIP Commander",
-            subtitle = "Tailored Charcoal Suit & 24K Gold Trim",
-            perkDescription = "+18% Exploration Speed & VIP Commander Aura",
-            speedMultiplier = 1.18f,
-            skinToneRgb = floatArrayOf(0.84f, 0.64f, 0.49f),
-            hairColorRgb = floatArrayOf(0.09f, 0.08f, 0.08f),
-            shirtColorRgb = floatArrayOf(0.98f, 0.96f, 0.92f),
-            jacketColorRgb = floatArrayOf(0.16f, 0.17f, 0.22f),
-            pantsColorRgb = floatArrayOf(0.13f, 0.14f, 0.18f),
-            shoeColorRgb = floatArrayOf(0.26f, 0.16f, 0.10f),
-            accentColorRgb = floatArrayOf(0.95f, 0.72f, 0.12f),
-            previewAccent = Color(0xFF22C55E),
-            badgeLabel = "LEGENDARY",
-            agilityRating = 0.96f,
-            staminaRating = 0.95f,
-            drivingRating = 0.94f
+            accentColorRgb = floatArrayOf(0.22f, 0.74f, 0.97f),
+            previewAccent = Color(0xFF38BDF8),
+            badgeLabel = "OFFICIAL 3D",
+            agilityRating = 0.88f,
+            staminaRating = 0.90f,
+            drivingRating = 0.86f
         )
     )
 
     fun byId(id: String): CharacterSkin = all.firstOrNull { it.id == id } ?: all.first()
 }
 
+/**
+ * Real working 3D Vehicle Paint Wraps applied directly to the player's driven Car / Bullet 350
+ * inside OpenGLCityRenderer!
+ */
+data class VehiclePaintWrap(
+    val id: String,
+    val name: String,
+    val description: String,
+    val swatchColor: Color,
+    val rgbOverride: FloatArray?, // null = keep factory original paint
+    val priceCoins: Int,
+    val rarity: ItemRarity
+)
+
+object GameVehicleWraps {
+    val all: List<VehiclePaintWrap> = listOf(
+        VehiclePaintWrap(
+            id = "wrap_factory",
+            name = "Factory Original",
+            description = "Keeps each car & Bullet bike's original showroom paint.",
+            swatchColor = Color(0xFF64748B),
+            rgbOverride = null,
+            priceCoins = 0,
+            rarity = ItemRarity.COMMON
+        ),
+        VehiclePaintWrap(
+            id = "wrap_stealth_carbon",
+            name = "Midnight Carbon",
+            description = "Applies sleek matte obsidian-carbon finish to your driven vehicle.",
+            swatchColor = Color(0xFF1E242E),
+            rgbOverride = floatArrayOf(0.11f, 0.13f, 0.17f),
+            priceCoins = 250,
+            rarity = ItemRarity.RARE
+        ),
+        VehiclePaintWrap(
+            id = "wrap_crimson_blaze",
+            name = "Crimson Blaze",
+            description = "Applies glossy racing crimson finish to any car or bike you drive.",
+            swatchColor = Color(0xFFD91E2A),
+            rgbOverride = floatArrayOf(0.84f, 0.11f, 0.16f),
+            priceCoins = 400,
+            rarity = ItemRarity.RARE
+        ),
+        VehiclePaintWrap(
+            id = "wrap_arctic_pearl",
+            name = "Arctic Pearl",
+            description = "Applies bright metallic pearl-white paint to your active vehicle.",
+            swatchColor = Color(0xFFE8EEF5),
+            rgbOverride = floatArrayOf(0.92f, 0.94f, 0.97f),
+            priceCoins = 450,
+            rarity = ItemRarity.EPIC
+        ),
+        VehiclePaintWrap(
+            id = "wrap_emerald_gt",
+            name = "Emerald GT",
+            description = "Applies deep British racing emerald finish to your active vehicle.",
+            swatchColor = Color(0xFF108E56),
+            rgbOverride = floatArrayOf(0.07f, 0.56f, 0.34f),
+            priceCoins = 550,
+            rarity = ItemRarity.EPIC
+        ),
+        VehiclePaintWrap(
+            id = "wrap_electric_cyan",
+            name = "Electric Cyan",
+            description = "Applies vibrant metallic neon-cyan finish to your driven vehicle.",
+            swatchColor = Color(0xFF0EA5E9),
+            rgbOverride = floatArrayOf(0.06f, 0.66f, 0.92f),
+            priceCoins = 650,
+            rarity = ItemRarity.LEGENDARY
+        )
+    )
+
+    fun byId(id: String): VehiclePaintWrap = all.firstOrNull { it.id == id } ?: all.first()
+}
+
+/**
+ * Real working 3D Character Emotes backed by the real rigged GLB animation clips!
+ * clipIndex maps directly to PlayerAnimClip ordinal:
+ * 0=STAND, 1=RUN, 2=FLIP, 3=HAND_FIGHT, 4=LEG_FIGHT, 5=RELEASE
+ */
+data class GameEmote(
+    val id: String,
+    val name: String,
+    val shortLabel: String,
+    val description: String,
+    val clipIndex: Int,
+    val priceCoins: Int,
+    val rarity: ItemRarity
+)
+
+object GameEmotes {
+    val all: List<GameEmote> = listOf(
+        GameEmote(
+            id = "emote_flip",
+            name = "Acrobat Backflip",
+            shortLabel = "BACKFLIP",
+            description = "Performs a full rigged 3D parkour backflip on command.",
+            clipIndex = 2,
+            priceCoins = 0,
+            rarity = ItemRarity.COMMON
+        ),
+        GameEmote(
+            id = "emote_shadow_box",
+            name = "Shadow Boxing",
+            shortLabel = "BOXING",
+            description = "Unleashes a rapid 3D combat hand-fight combo emote.",
+            clipIndex = 3,
+            priceCoins = 0,
+            rarity = ItemRarity.COMMON
+        ),
+        GameEmote(
+            id = "emote_martial_kick",
+            name = "Martial High Kick",
+            shortLabel = "HIGH KICK",
+            description = "Performs a sharp martial-arts spinning leg-fight showcase.",
+            clipIndex = 4,
+            priceCoins = 150,
+            rarity = ItemRarity.RARE
+        ),
+        GameEmote(
+            id = "emote_hero_drop",
+            name = "Superhero Landing",
+            shortLabel = "HERO DROP",
+            description = "Crouches into a dramatic 3D superhero release pose.",
+            clipIndex = 5,
+            priceCoins = 200,
+            rarity = ItemRarity.EPIC
+        )
+    )
+
+    fun byId(id: String): GameEmote = all.firstOrNull { it.id == id } ?: all.first()
+}
+
 enum class StoreCategory(val label: String) {
     ALL("ALL"),
-    OUTFITS("OUTFITS"),
-    VEHICLES("VEHICLES"),
-    EMOTES("EMOTES"),
-    GEAR("GEAR")
+    VEHICLE_PAINTS("VEHICLE PAINTS"),
+    EMOTES("3D EMOTES")
 }
 
 enum class ItemRarity(val label: String, val color: Color) {
-    COMMON("COMMON", RarityCommon),
+    COMMON("STANDARD", RarityCommon),
     RARE("RARE", RarityRare),
     EPIC("EPIC", RarityEpic),
-    LEGENDARY("LEGENDARY", RarityLegendary)
+    LEGENDARY("PRO", RarityLegendary)
 }
 
 data class StoreItem(
@@ -159,163 +253,217 @@ data class StoreItem(
     val priceCoins: Int = 0,
     val priceDiamonds: Int = 0,
     val rarity: ItemRarity,
-    val linkedSkinId: String? = null
+    val linkedWrapId: String? = null,
+    val linkedEmoteId: String? = null,
+    val swatchColor: Color? = null
 )
 
+/**
+ * 100% REAL Working Store Catalog — ZERO fake unimplemented outfits, gear, or bundles!
+ * Every single item either visibly paints your 3D driven vehicle or unlocks a real 3D Emote.
+ */
 object GameStoreCatalog {
-    val defaultOwnedIds: Set<String> = setOf("outfit_urban_explorer", "emote_idle_wave", "vehicle_classic_bullet")
+    val defaultOwnedIds: Set<String> = setOf("wrap_factory", "emote_flip", "emote_shadow_box")
 
-    val items: List<StoreItem> = listOf(
-        StoreItem(
-            id = "outfit_urban_explorer",
-            name = "Ajay Street Hoodie",
-            category = StoreCategory.OUTFITS,
-            description = "Signature dark street hoodie with white low-top sneakers.",
-            priceCoins = 0,
-            rarity = ItemRarity.COMMON,
-            linkedSkinId = "urban_explorer"
-        ),
-        StoreItem(
-            id = "outfit_saini_streetwear",
-            name = "Crimson Striker Bundle",
-            category = StoreCategory.OUTFITS,
-            description = "+12% sprint agility outfit for rapid urban runs.",
-            priceCoins = 600,
-            rarity = ItemRarity.RARE,
-            linkedSkinId = "saini_streetwear"
-        ),
-        StoreItem(
-            id = "outfit_metro_tactical",
-            name = "Bullet Rider Pack",
-            category = StoreCategory.OUTFITS,
-            description = "Heavy biker leather gear with +10% speed & bike control.",
-            priceCoins = 950,
-            rarity = ItemRarity.EPIC,
-            linkedSkinId = "metro_tactical"
-        ),
-        StoreItem(
-            id = "outfit_golden_legend",
-            name = "Saini VIP Commander",
-            category = StoreCategory.OUTFITS,
-            description = "Elite VIP suit with +18% exploration speed bonus.",
-            priceDiamonds = 100,
-            rarity = ItemRarity.LEGENDARY,
-            linkedSkinId = "golden_legend"
-        ),
-        StoreItem(
-            id = "vehicle_classic_bullet",
-            name = "Royal Bullet 350 Stock",
-            category = StoreCategory.VEHICLES,
-            description = "Factory chrome & jet-black cruiser finish.",
-            priceCoins = 0,
-            rarity = ItemRarity.COMMON
-        ),
-        StoreItem(
-            id = "vehicle_matte_stealth",
-            name = "Bullet Matte Stealth Coat",
-            category = StoreCategory.VEHICLES,
-            description = "Tactical desert-black custom tank decal & twin exhaust.",
-            priceCoins = 500,
-            rarity = ItemRarity.RARE
-        ),
-        StoreItem(
-            id = "vehicle_gold_sedan",
-            name = "Executive Gold Sedan Wrap",
-            category = StoreCategory.VEHICLES,
-            description = "Metallic brushed-gold finish for Saini City sedans.",
-            priceDiamonds = 60,
-            rarity = ItemRarity.EPIC
-        ),
-        StoreItem(
-            id = "emote_idle_wave",
-            name = "Street Ready Stance",
-            category = StoreCategory.EMOTES,
-            description = "Signature relaxed gesture pose in the Lobby.",
-            priceCoins = 0,
-            rarity = ItemRarity.COMMON
-        ),
-        StoreItem(
-            id = "emote_tactical_sprint",
-            name = "Tactical Dash Showcase",
-            category = StoreCategory.EMOTES,
-            description = "Unlocks combat-ready athletic preview stance.",
-            priceCoins = 350,
-            rarity = ItemRarity.RARE
-        ),
-        StoreItem(
-            id = "gear_stamina_pack",
-            name = "Tactical Utility Pack",
-            category = StoreCategory.GEAR,
-            description = "Reinforced urban backpack for extended city exploration.",
-            priceCoins = 450,
-            rarity = ItemRarity.EPIC
-        ),
-        StoreItem(
-            id = "gear_aviator_shades",
-            name = "Commander Aviators",
-            category = StoreCategory.GEAR,
-            description = "Polarized gold-frame sunglasses for bright daytime runs.",
-            priceDiamonds = 40,
-            rarity = ItemRarity.LEGENDARY
-        )
-    )
+    val items: List<StoreItem> = buildList {
+        GameVehicleWraps.all.forEach { wrap ->
+            add(
+                StoreItem(
+                    id = wrap.id,
+                    name = wrap.name,
+                    category = StoreCategory.VEHICLE_PAINTS,
+                    description = wrap.description,
+                    priceCoins = wrap.priceCoins,
+                    rarity = wrap.rarity,
+                    linkedWrapId = wrap.id,
+                    swatchColor = wrap.swatchColor
+                )
+            )
+        }
+        GameEmotes.all.forEach { em ->
+            add(
+                StoreItem(
+                    id = em.id,
+                    name = em.name,
+                    category = StoreCategory.EMOTES,
+                    description = em.description,
+                    priceCoins = em.priceCoins,
+                    rarity = em.rarity,
+                    linkedEmoteId = em.id
+                )
+            )
+        }
+    }
 }
 
-enum class MissionMetric {
-    ZONES,
-    DISTANCE,
-    SCORE
-}
-
-data class DailyMission(
+/**
+ * Real Spawn Locations selectable directly from the Lobby!
+ */
+data class SpawnDistrict(
     val id: String,
-    val title: String,
-    val subtitle: String,
-    val targetValue: Int,
-    val rewardCoins: Int,
-    val rewardDiamonds: Int,
-    val metric: MissionMetric
+    val name: String,
+    val regionTag: String,
+    val x: Float,
+    val z: Float
 )
 
-object GameMissions {
-    val all: List<DailyMission> = listOf(
-        DailyMission(
-            id = "mission_first_steps",
-            title = "City Patrol",
-            subtitle = "Travel 120 meters across Saini City",
-            targetValue = 120,
-            rewardCoins = 250,
-            rewardDiamonds = 15,
-            metric = MissionMetric.DISTANCE
-        ),
-        DailyMission(
-            id = "mission_zone_scout",
-            title = "District Scout",
-            subtitle = "Discover 2 landmarks in Saini City",
-            targetValue = 2,
-            rewardCoins = 400,
-            rewardDiamonds = 25,
-            metric = MissionMetric.ZONES
-        ),
-        DailyMission(
-            id = "mission_coin_hunter",
-            title = "Score Hunter",
-            subtitle = "Reach 500 total exploration points",
-            targetValue = 500,
-            rewardCoins = 500,
-            rewardDiamonds = 30,
-            metric = MissionMetric.SCORE
-        ),
-        DailyMission(
-            id = "mission_master_explorer",
-            title = "Saini Grand Explorer",
-            subtitle = "Discover 5 or more city zones",
-            targetValue = 5,
-            rewardCoins = 1000,
-            rewardDiamonds = 75,
-            metric = MissionMetric.ZONES
-        )
+object SpawnDistricts {
+    val all: List<SpawnDistrict> = listOf(
+        SpawnDistrict("saini_plaza", "Saini Central City", "METRO HUB", 0f, 8.2f),
+        SpawnDistrict("saini_airport", "International Airport", "RUNWAY & ATC", 312f, -248f),
+        SpawnDistrict("saini_army_base", "Saini Army Airbase", "MILITARY BASE", -312f, -248f),
+        SpawnDistrict("saini_keys_island", "Saini Keys Resort", "ISLAND 1", 600f, 5200f),
+        SpawnDistrict("goa_palma_island", "Goa Palma City", "MEGA-ISLAND", -12400f, 13600f),
+        SpawnDistrict("emerald_port_island", "Emerald Port City", "HARBOR ISLAND", 12200f, 14200f),
+        SpawnDistrict("vice_volcano_island", "Vice Volcano Isle", "SOUTH ISLAND", -300f, 20850f),
+        SpawnDistrict("shimla_mall", "Jammu & Himalayas", "NORTH PEAKS", -350f, -15800f),
+        SpawnDistrict("saini_garh_fort", "Thar Desert Fort", "RAJASTHAN", -12400f, -2400f),
+        SpawnDistrict("jungle_temple", "Emerald Jungle", "EAST FOREST", 11800f, -3800f)
     )
+
+    fun byId(id: String): SpawnDistrict = all.firstOrNull { it.id == id } ?: all.first()
+}
+
+data class GameAvatar(
+    val id: String,
+    val name: String,
+    val primaryColor: Color,
+    val accentColor: Color,
+    val badgeBg: Color,
+    val styleIndex: Int
+)
+
+object GameAvatars {
+    val all: List<GameAvatar> = listOf(
+        GameAvatar("avatar_viper", "Viper", Color(0xFF00E5FF), Color(0xFF0284C7), Color(0xFF0B1C2C), 0),
+        GameAvatar("avatar_phantom", "Phantom", Color(0xFFFF4655), Color(0xFF991B1B), Color(0xFF240F17), 1),
+        GameAvatar("avatar_apex", "Apex", Color(0xFF10B981), Color(0xFF047857), Color(0xFF0B231D), 2),
+        GameAvatar("avatar_falcon", "Falcon", Color(0xFF60A5FA), Color(0xFF2563EB), Color(0xFF0F1B33), 3),
+        GameAvatar("avatar_nova", "Nova", Color(0xFFA855F7), Color(0xFF6D28D9), Color(0xFF1E1133), 4),
+        GameAvatar("avatar_ronin", "Ronin", Color(0xFFF43F5E), Color(0xFFBE123C), Color(0xFF290F19), 5),
+        GameAvatar("avatar_titan", "Titan", Color(0xFF94A3B8), Color(0xFF475569), Color(0xFF141B24), 6),
+        GameAvatar("avatar_cyber", "Cyber", Color(0xFF2DD4BF), Color(0xFF0D9488), Color(0xFF0B2424), 7)
+    )
+
+    fun byId(id: String): GameAvatar = all.firstOrNull { it.id == id } ?: all.first()
+}
+
+enum class HudElementGroup {
+    COMMON,
+    ON_FOOT,
+    VEHICLE
+}
+
+/**
+ * EVERY single button & widget is its own individually customizable HUD element!
+ * No grouped strips — move, resize, fade, or hide any single button independently.
+ */
+enum class HudElementId(val label: String, val group: HudElementGroup) {
+    HEALTH_BAR("Health Bar", HudElementGroup.COMMON),
+    STAMINA_BAR("Stamina Bar", HudElementGroup.COMMON),
+    SCORE_BADGE("Score & Zones", HudElementGroup.COMMON),
+    FPS_COUNTER("FPS Counter", HudElementGroup.COMMON),
+    LOCATION_BAR("Location Tag", HudElementGroup.COMMON),
+    TIME_BTN("Day / Night", HudElementGroup.COMMON),
+    WEATHER_BTN("Weather", HudElementGroup.COMMON),
+    MINIMAP("Mini-Map", HudElementGroup.COMMON),
+    PAUSE_BTN("Pause Button", HudElementGroup.COMMON),
+    JOYSTICK("Move Joystick", HudElementGroup.ON_FOOT),
+    BTN_PUNCH("Punch Button", HudElementGroup.ON_FOOT),
+    BTN_KICK("Kick Button", HudElementGroup.ON_FOOT),
+    BTN_FLIP("Flip Button", HudElementGroup.ON_FOOT),
+    BTN_DROP("Drop Button", HudElementGroup.ON_FOOT),
+    BTN_EMOTE("Emote Button", HudElementGroup.ON_FOOT),
+    BTN_RUN("Run / Boost", HudElementGroup.COMMON),
+    BTN_JUMP("Jump Button", HudElementGroup.ON_FOOT),
+    BTN_USE("Use / Exit", HudElementGroup.COMMON),
+    BTN_HORN("Car Horn", HudElementGroup.VEHICLE),
+    SPEEDOMETER("Speedometer", HudElementGroup.VEHICLE),
+    VEHICLE_STEER("Steer L / R", HudElementGroup.VEHICLE),
+    VEHICLE_PEDALS("Gas / Brake", HudElementGroup.VEHICLE)
+}
+
+data class HudElementConfig(
+    val xNorm: Float,
+    val yNorm: Float,
+    val scale: Float = 1.0f,
+    val visible: Boolean = true,
+    val opacity: Float = 1.0f
+)
+
+data class CustomHudLayout(
+    val elements: Map<HudElementId, HudElementConfig> = defaultElements()
+) {
+    fun configFor(id: HudElementId): HudElementConfig =
+        elements[id] ?: defaultElements().getValue(id)
+
+    fun updated(id: HudElementId, cfg: HudElementConfig): CustomHudLayout =
+        copy(elements = elements + (id to cfg))
+
+    fun serialize(): String = HudElementId.entries.joinToString(";") { id ->
+        val c = configFor(id)
+        "${id.name},${"%.3f".format(java.util.Locale.US, c.xNorm)},${"%.3f".format(java.util.Locale.US, c.yNorm)},${"%.2f".format(java.util.Locale.US, c.scale)},${if (c.visible) 1 else 0},${"%.2f".format(java.util.Locale.US, c.opacity)}"
+    }
+
+    companion object {
+        fun defaultElements(): Map<HudElementId, HudElementConfig> = mapOf(
+            // Top-Left Status Cluster (individually movable!)
+            HudElementId.HEALTH_BAR to HudElementConfig(0.09f, 0.065f, 1.0f, true, 1.0f),
+            HudElementId.STAMINA_BAR to HudElementConfig(0.09f, 0.125f, 1.0f, true, 1.0f),
+            HudElementId.SCORE_BADGE to HudElementConfig(0.24f, 0.085f, 1.0f, true, 1.0f),
+            HudElementId.FPS_COUNTER to HudElementConfig(0.37f, 0.075f, 1.0f, true, 1.0f),
+            HudElementId.LOCATION_BAR to HudElementConfig(0.11f, 0.195f, 1.0f, true, 1.0f),
+            HudElementId.TIME_BTN to HudElementConfig(0.27f, 0.195f, 1.0f, true, 1.0f),
+            HudElementId.WEATHER_BTN to HudElementConfig(0.37f, 0.195f, 1.0f, true, 1.0f),
+            // Top-Right Radar & Pause
+            HudElementId.MINIMAP to HudElementConfig(0.84f, 0.18f, 1.0f, true, 1.0f),
+            HudElementId.PAUSE_BTN to HudElementConfig(0.955f, 0.08f, 1.0f, true, 1.0f),
+            // Bottom-Left Movement & Vehicle Steer
+            HudElementId.JOYSTICK to HudElementConfig(0.12f, 0.77f, 1.0f, true, 1.0f),
+            HudElementId.VEHICLE_STEER to HudElementConfig(0.14f, 0.80f, 1.0f, true, 1.0f),
+            // Bottom-Right Individual Combat, Emote & Action Buttons
+            HudElementId.BTN_EMOTE to HudElementConfig(0.68f, 0.56f, 1.0f, true, 1.0f),
+            HudElementId.BTN_PUNCH to HudElementConfig(0.755f, 0.56f, 1.0f, true, 1.0f),
+            HudElementId.BTN_KICK to HudElementConfig(0.83f, 0.56f, 1.0f, true, 1.0f),
+            HudElementId.BTN_FLIP to HudElementConfig(0.905f, 0.56f, 1.0f, true, 1.0f),
+            HudElementId.BTN_DROP to HudElementConfig(0.955f, 0.68f, 1.0f, true, 1.0f),
+            HudElementId.BTN_RUN to HudElementConfig(0.74f, 0.82f, 1.0f, true, 1.0f),
+            HudElementId.BTN_JUMP to HudElementConfig(0.83f, 0.76f, 1.0f, true, 1.0f),
+            HudElementId.BTN_USE to HudElementConfig(0.92f, 0.84f, 1.0f, true, 1.0f),
+            // Vehicle-Specific Individual Widgets
+            HudElementId.SPEEDOMETER to HudElementConfig(0.50f, 0.88f, 1.0f, true, 1.0f),
+            HudElementId.BTN_HORN to HudElementConfig(0.68f, 0.82f, 1.0f, true, 1.0f),
+            HudElementId.VEHICLE_PEDALS to HudElementConfig(0.84f, 0.80f, 1.0f, true, 1.0f)
+        )
+
+        fun default(): CustomHudLayout = CustomHudLayout(defaultElements())
+
+        fun deserialize(raw: String?): CustomHudLayout {
+            if (raw.isNullOrBlank()) return default()
+            val map = defaultElements().toMutableMap()
+            raw.split(";").forEach { entry ->
+                val parts = entry.split(",")
+                if (parts.size >= 5) {
+                    val id = runCatching { HudElementId.valueOf(parts[0]) }.getOrNull()
+                    val x = parts[1].toFloatOrNull()
+                    val y = parts[2].toFloatOrNull()
+                    val s = parts[3].toFloatOrNull()
+                    val v = parts[4] == "1"
+                    val o = if (parts.size >= 6) (parts[5].toFloatOrNull() ?: 1.0f) else 1.0f
+                    if (id != null && x != null && y != null && s != null) {
+                        map[id] = HudElementConfig(
+                            xNorm = x.coerceIn(0.03f, 0.97f),
+                            yNorm = y.coerceIn(0.04f, 0.96f),
+                            scale = s.coerceIn(0.65f, 1.45f),
+                            visible = v,
+                            opacity = o.coerceIn(0.30f, 1.0f)
+                        )
+                    }
+                }
+            }
+            return CustomHudLayout(map)
+        }
+    }
 }
 
 data class ExplorationZone(
@@ -419,40 +567,155 @@ object CityZones {
             z = -248f,
             radius = 34f,
             bonusPoints = 450
+        ),
+        ExplorationZone(
+            id = "shimla_mall",
+            name = "Jammu & Shimla Mall",
+            description = "Alpine mountain town & snow pass on NH-01 North Highway",
+            x = -350f,
+            z = -15800f,
+            radius = 160f,
+            bonusPoints = 500
+        ),
+        ExplorationZone(
+            id = "snow_peak_viewpoint",
+            name = "Himalayan Snow Summit",
+            description = "High-altitude Kashmir & Ladakh glacier summit overlook",
+            x = -1200f,
+            z = -24500f,
+            radius = 180f,
+            bonusPoints = 600
+        ),
+        ExplorationZone(
+            id = "saini_garh_fort",
+            name = "Saini Garh Desert Fort",
+            description = "Majestic sandstone fort overlooking the vast Thar Desert",
+            x = -12400f,
+            z = -2400f,
+            radius = 170f,
+            bonusPoints = 600
+        ),
+        ExplorationZone(
+            id = "gram_chaupal",
+            name = "Saini Gram & Khet Plains",
+            description = "Expansive countryside village, green meadows & farm trails",
+            x = 2200f,
+            z = -6800f,
+            radius = 160f,
+            bonusPoints = 450
+        ),
+        ExplorationZone(
+            id = "jungle_temple",
+            name = "Emerald Jungle Sanctuary",
+            description = "Deep tropical river forest & ancient stone temple ruins",
+            x = 11800f,
+            z = -3800f,
+            radius = 170f,
+            bonusPoints = 600
+        ),
+        ExplorationZone(
+            id = "saini_keys_island",
+            name = "Saini Keys Resort Island",
+            description = "First overseas paradise island linked by Saini Sea Bridge",
+            x = 600f,
+            z = 5400f,
+            radius = 180f,
+            bonusPoints = 550
+        ),
+        ExplorationZone(
+            id = "goa_palma_island",
+            name = "Goa Palma Mega-Island",
+            description = "13.5 km southwestern beach metropolis, marinas & coastal ring",
+            x = -12600f,
+            z = 13800f,
+            radius = 220f,
+            bonusPoints = 650
+        ),
+        ExplorationZone(
+            id = "emerald_port_island",
+            name = "Emerald Port Mega-Island",
+            description = "11.5 km southeastern cargo port, bay skyline & resort highway",
+            x = 12400f,
+            z = 14400f,
+            radius = 220f,
+            bonusPoints = 650
+        ),
+        ExplorationZone(
+            id = "vice_volcano_island",
+            name = "Vice Volcano Mega-Island",
+            description = "14.5 km far-south tropical caldera island & coastal speedway",
+            x = -400f,
+            z = 24800f,
+            radius = 240f,
+            bonusPoints = 750
+        ),
+        ExplorationZone(
+            id = "western_fort_island",
+            name = "Western Naval Fortress Island",
+            description = "Fortified western ocean stronghold connected via Naval Causeway",
+            x = -19200f,
+            z = 3800f,
+            radius = 180f,
+            bonusPoints = 600
+        ),
+        ExplorationZone(
+            id = "eastern_lagoon_island",
+            name = "Eastern Mangrove Lagoon Island",
+            description = "Lush eastern tropical bay island linked by Suspension Bridge",
+            x = 18200f,
+            z = 3400f,
+            radius = 180f,
+            bonusPoints = 600
         )
     )
 }
 
+/**
+ * Full real working Settings synchronized live with OpenGLCityRenderer, GameAudioEngine, and GameplayScreen.
+ * Tuned out-of-the-box for lag-free 60 FPS mobile play!
+ */
 data class GameSettings(
     val musicVolume: Float = 0.65f,
     val sfxVolume: Float = 0.85f,
     val isMuted: Boolean = false,
-    val graphicsQuality: GraphicsQuality = GraphicsQuality.HIGH,
+    val ambientAudioEnabled: Boolean = true,
+    val graphicsQuality: GraphicsQuality = GraphicsQuality.MEDIUM,
+    val renderResolution: RenderResolution = RenderResolution.BALANCED_85,
+    val shadowsEnabled: Boolean = false,
+    val grassDensity: DensityLevel = DensityLevel.MEDIUM,
+    val aiTrafficDensity: DensityLevel = DensityLevel.MEDIUM,
+    val npcDensity: DensityLevel = DensityLevel.MEDIUM,
+    val dynamicDayNight: Boolean = true,
     val controlLayout: ControlLayout = ControlLayout.JOYSTICK,
+    val vehicleControlMode: VehicleControlMode = VehicleControlMode.BUTTONS,
     val cameraSensitivity: Float = 1.0f,
-    val targetFps: Int = 120,
-    val streamingRadiusMeters: Float = 62f
+    val invertCameraY: Boolean = false,
+    val autoCenterVehicleCam: Boolean = true,
+    val autoSprint: Boolean = false,
+    val hapticsEnabled: Boolean = true,
+    val hudOpacity: Float = 0.92f,
+    val minimapAutoZoom: Boolean = true,
+    val targetFps: Int = 60,
+    val streamingRadiusMeters: Float = 52f,
+    val selectedSpawnId: String = "saini_plaza",
+    val startNightMode: Boolean = false,
+    val startRainMode: Boolean = false,
+    val selectedVehicleWrapId: String = "wrap_factory",
+    val selectedEmoteId: String = "emote_flip",
+    val customHudLayout: CustomHudLayout = CustomHudLayout.default()
 )
 
 data class PlayerProfileStats(
+    val playerName: String = "",
+    val hasSetUsername: Boolean = false,
+    val selectedAvatarId: String = "avatar_viper",
     val totalScore: Int = 0,
     val highScore: Int = 0,
-    val coins: Int = 1200,
-    val diamonds: Int = 150,
+    val coins: Int = 0,
+    val diamonds: Int = 0,
     val distanceMeters: Int = 0,
     val zonesDiscoveredTotal: Int = 0
-) {
-    val level: Int
-        get() = (1 + (totalScore / 300) + zonesDiscoveredTotal).coerceAtLeast(1)
-
-    val explorerRank: String
-        get() = when {
-            highScore >= 2500 -> "Heroic Legend"
-            highScore >= 1200 -> "Diamond Explorer"
-            highScore >= 500 -> "Gold Pathfinder"
-            else -> "Silver Rookie"
-        }
-}
+)
 
 enum class WeatherState(val label: String) {
     CLEAR("Clear"),
@@ -505,5 +768,9 @@ data class GameTelemetry(
     val vehicleMode: ActiveVehicleMode = ActiveVehicleMode.ON_FOOT,
     val vehicleSpeedKmh: Int = 0,
     val nearbyGateName: String? = null,
-    val nearbyGateProgress: Float = 0f
+    val nearbyGateProgress: Float = 0f,
+    val isInWater: Boolean = false,
+    val waterWarning: String? = null,
+    val parkedCarX: Float? = null,
+    val parkedCarZ: Float? = null
 )

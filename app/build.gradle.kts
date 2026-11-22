@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.sainisimulator.game"
     minSdk = 24
     targetSdk = 36
-    versionCode = 7
-    versionName = "2.5"
+    versionCode = 17
+    versionName = "3.4.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

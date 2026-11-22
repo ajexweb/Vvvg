@@ -26,23 +26,28 @@ enum class LobbyCameraPreset(val label: String, val zoomNormalized: Float, val l
     FACE_ZOOM("FACE ZOOM", 0.96f, 1.66f)
 }
 
-enum class LobbyPoseMode(val label: String) {
-    IDLE("IDLE"),
-    WALK("WALK"),
-    SPRINT("RUN")
+enum class LobbyPoseMode(val label: String, val clip: PlayerAnimClip) {
+    STAND("STAND", PlayerAnimClip.STAND),
+    RUN("RUN", PlayerAnimClip.RUN),
+    FLIP("FLIP", PlayerAnimClip.FLIP),
+    HAND_FIGHT("PUNCH", PlayerAnimClip.HAND_FIGHT),
+    LEG_FIGHT("KICK", PlayerAnimClip.LEG_FIGHT),
+    RELEASE("DROP", PlayerAnimClip.RELEASE)
 }
 
 class LobbyCharacterRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     @Volatile var targetYawDeg: Float = 12f
     @Volatile var targetZoom: Float = LobbyCameraPreset.FULL_BODY.zoomNormalized
-    @Volatile var poseMode: LobbyPoseMode = LobbyPoseMode.IDLE
+    @Volatile var poseMode: LobbyPoseMode = LobbyPoseMode.STAND
     @Volatile var autoSlowSpin: Boolean = false
     @Volatile var horizontalShift: Float = 0f // Optional framing offset (-0.35f..0.35f)
 
     private var currentYawDeg = 12f
     private var currentZoom = LobbyCameraPreset.FULL_BODY.zoomNormalized
     private var worldTime = 0f
+    private var poseElapsed = 0f
+    private var lastPoseMode = LobbyPoseMode.STAND
     private var lastFrameNs = 0L
 
     private var shader: CityShaderProgram? = null
@@ -72,7 +77,7 @@ class LobbyCharacterRenderer(private val context: Context) : GLSurfaceView.Rende
         ringMesh = GlMeshFactory.createGroundRing(segments = 60, innerRatio = 0.945f)
         floorMesh = GlMeshFactory.createCylinder(segments = 36, topScale = 1.0f, bottomScale = 1.0f)
 
-        glbPlayer = GlbSkinnedPlayer.loadFromAssets(context, "player.glb", texWhite)
+        glbPlayer = GlbSkinnedPlayer.loadFromAssets(context, "playerstand.glb", texWhite)
         lastFrameNs = System.nanoTime()
     }
 
@@ -120,24 +125,26 @@ class LobbyCharacterRenderer(private val context: Context) : GLSurfaceView.Rende
         // Draw tactical metallic character bay podium under feet
         drawStudioPodium(camX, camY, camDist)
 
-        // Update and draw rigged Avaturn player.glb
+        // Update and draw rigged Avaturn character with all 6 real GLB animations
         val player = glbPlayer ?: return
         val mode = poseMode
-        val isMoving = mode == LobbyPoseMode.WALK || mode == LobbyPoseMode.SPRINT
-        val isSprinting = mode == LobbyPoseMode.SPRINT
-        val walkCycle = when (mode) {
-            LobbyPoseMode.IDLE -> 0f
-            LobbyPoseMode.WALK -> worldTime * 6.4f
-            LobbyPoseMode.SPRINT -> worldTime * 10.6f
+        if (mode != lastPoseMode) {
+            poseElapsed = 0f
+            lastPoseMode = mode
+        } else {
+            poseElapsed += dt
         }
 
         player.updatePose(
             worldTime = worldTime,
-            walkCycle = walkCycle,
-            isMoving = isMoving,
-            isSprinting = isSprinting,
+            walkCycle = 0f,
+            isMoving = mode == LobbyPoseMode.RUN,
+            isSprinting = mode == LobbyPoseMode.RUN,
             isGrounded = true,
-            isRidingBike = false
+            isRidingBike = false,
+            forcedActionClip = mode.clip,
+            actionTimeSec = poseElapsed,
+            loopForcedClip = true
         )
 
         // Balanced warm key light from front-right + soft studio ambient so skin & face look natural
@@ -204,12 +211,12 @@ class LobbyCharacterRenderer(private val context: Context) : GLSurfaceView.Rende
             emissive = 0.0f, spec = 0.42f, refl = 0.18f
         )
 
-        // Subtle warm tactical gold trim ring around the platform edge
+        // Subtle sleek tactical cyan trim ring around the platform edge
         GLES20.glDisable(GLES20.GL_CULL_FACE)
         drawPodiumMesh(
             sh, ring,
             0f, 0.002f, 0f, 0.93f, 1f, 0.93f,
-            r = 1.0f, g = 0.72f, b = 0.05f, a = 0.85f,
+            r = 0.22f, g = 0.74f, b = 0.97f, a = 0.85f,
             emissive = 0.35f, spec = 0.2f, refl = 0.0f
         )
         drawPodiumMesh(
@@ -274,6 +281,7 @@ fun InteractiveLobbyCharacter3D(
     poseMode: LobbyPoseMode,
     yawDeg: Float,
     horizontalShift: Float = 0f,
+    isPaused: Boolean = false,
     onYawChange: (Float) -> Unit,
     onZoomChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
@@ -289,8 +297,12 @@ fun InteractiveLobbyCharacter3D(
         glView.characterRenderer.horizontalShift = horizontalShift
     }
 
+    LaunchedEffect(glView, isPaused) {
+        if (isPaused) glView.onPause() else glView.onResume()
+    }
+
     DisposableEffect(glView) {
-        glView.onResume()
+        if (!isPaused) glView.onResume()
         onDispose {
             glView.onPause()
         }

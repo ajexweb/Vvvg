@@ -12,6 +12,7 @@ import com.example.game.model.ActiveVehicleMode
 import com.example.game.model.CarCrashType
 import com.example.game.model.CharacterSkin
 import com.example.game.model.CityZones
+import com.example.game.model.DensityLevel
 import com.example.game.model.GameSkins
 import com.example.game.model.GameTelemetry
 import com.example.game.model.GraphicsQuality
@@ -29,19 +30,49 @@ import kotlin.math.sqrt
 class PlayerInputState {
     @Volatile var moveX: Float = 0f
     @Volatile var moveY: Float = 0f
+    @Volatile var vehSteer: Float = 0f      // Dedicated Vehicle Buttons steering (-1 left, +1 right)
+    @Volatile var vehThrottle: Float = 0f   // Dedicated Vehicle Buttons pedal (+1 gas, -1 brake/reverse)
     @Volatile var isSprinting: Boolean = false
     @Volatile var jumpQueued: Boolean = false
     @Volatile var interactQueued: Boolean = false
     @Volatile var hornQueued: Boolean = false
+    @Volatile var handFightQueued: Boolean = false
+    @Volatile var legFightQueued: Boolean = false
+    @Volatile var flipQueued: Boolean = false
+    @Volatile var releaseQueued: Boolean = false
+    @Volatile var emoteQueued: Boolean = false
+    @Volatile var emoteClipOrdinal: Int = 2 // Maps to PlayerAnimClip.entries
     @Volatile var toggleWeatherQueued: Boolean = false
     @Volatile var toggleDayNightQueued: Boolean = false
     @Volatile var cameraYawDelta: Float = 0f
     @Volatile var cameraPitchDelta: Float = 0f
     @Volatile var holdGateOpen: Boolean = false
     @Volatile var holdGateClose: Boolean = false
+
+    fun resetAll() {
+        moveX = 0f
+        moveY = 0f
+        vehSteer = 0f
+        vehThrottle = 0f
+        isSprinting = false
+        jumpQueued = false
+        interactQueued = false
+        hornQueued = false
+        handFightQueued = false
+        legFightQueued = false
+        flipQueued = false
+        releaseQueued = false
+        emoteQueued = false
+        holdGateOpen = false
+        holdGateClose = false
+        cameraYawDelta = 0f
+        cameraPitchDelta = 0f
+    }
 }
 
 interface GameEngineListener {
+    fun onWorldLoadProgress(progress: Float, stageLabel: String)
+    fun onWorldReady()
     fun onTelemetryUpdate(telemetry: GameTelemetry)
     fun onFootstep(isSprint: Boolean, surface: GroundSurface)
     fun onOrbCollected(orbId: Int, newScore: Int)
@@ -50,6 +81,7 @@ interface GameEngineListener {
     fun onJumpPerformed()
     fun onPlayerLand(heavy: Boolean)
     fun onPlayerWallVault()
+    fun onCombatAction(isKick: Boolean)
     fun onDoorToggled(buildingName: String, opening: Boolean)
     fun onIronGateToggled(gateName: String, opening: Boolean)
     fun onIronGateMoving()
@@ -86,16 +118,33 @@ class OpenGLCityRenderer(
     private lateinit var assets: CityRenderAssets
     private lateinit var dc: GlDrawContext
     private var glbPlayer: GlbSkinnedPlayer? = null
+    private var grassSystem: RealisticGrassSystem? = null
+    private var terrainChunkManager: WorldTerrainChunkManager? = null
 
-    // Settings synchronized from ViewModel
+    // Settings synchronized live from ViewModel
     @Volatile var isPaused: Boolean = false
     @Volatile var activeSkin: CharacterSkin = GameSkins.all.first()
-    @Volatile var graphicsQuality: GraphicsQuality = GraphicsQuality.HIGH
+    @Volatile var graphicsQuality: GraphicsQuality = GraphicsQuality.MEDIUM
+    @Volatile var shadowsEnabled: Boolean = false
+    @Volatile var grassDensity: DensityLevel = DensityLevel.MEDIUM
+    @Volatile var aiTrafficDensity: DensityLevel = DensityLevel.MEDIUM
+    @Volatile var npcDensity: DensityLevel = DensityLevel.MEDIUM
+    @Volatile var dynamicDayNight: Boolean = true
+    @Volatile var invertCameraY: Boolean = false
+    @Volatile var autoCenterVehicleCam: Boolean = true
+    @Volatile var autoSprint: Boolean = false
+    @Volatile var vehicleWrapRgb: FloatArray? = null
     @Volatile var cameraSensitivity: Float = 1.0f
-    @Volatile var streamingRadiusMeters: Float = 62f
+    @Volatile var streamingRadiusMeters: Float = 52f
     @Volatile var waypointActive: Boolean = false
     @Volatile var waypointX: Float = 0f
     @Volatile var waypointZ: Float = 0f
+
+    // Initial spawn & world condition config chosen in Lobby
+    @Volatile var spawnX: Float = 0f
+    @Volatile var spawnZ: Float = 8.2f
+    @Volatile var initialNightMode: Boolean = false
+    @Volatile var initialRainMode: Boolean = false
 
     // Player & Camera state
     private var playerX = 0f
@@ -106,10 +155,19 @@ class OpenGLCityRenderer(
     private var isGrounded = true
     private var playerFacingYaw = PI.toFloat()
 
-    // Vehicle state (drivable cars & rideable Bullet 350 bikes!)
+    // Vehicle state (drivable parked cars, drivable AI traffic cars & rideable Bullet 350 bikes!)
     private var drivenCar: ParkedCar? = null
+    private var drivenAiCar: CarAgent? = null
     private var riddenBike: BulletBikeProp? = null
     private var vehicleSpeed = 0f
+    private var vehicleVelY = 0f
+    private var vehicleGrounded = true
+    private var lastPlayerVehX: Float? = null
+    private var lastPlayerVehZ: Float? = null
+    private var isInWaterNow = false
+    private var currentWaterWarning: String? = null
+    private var playerSlopePitchDeg = 0f
+    private var playerSlopeRollDeg = 0f
     private var lastCarRevTime = -10f
     private var lastCarSkidTime = -10f
     private var lastCarCrashTime = -10f
@@ -127,7 +185,29 @@ class OpenGLCityRenderer(
     private var isMovingNow = false
     private var nearbyGate: InteractiveGate? = null
     private var gatePushBlend = 0f
+
+    // Multi-animation one-shot action state (FLIP / HAND_FIGHT / LEG_FIGHT / RELEASE)
+    private var activeActionClip: PlayerAnimClip? = null
+    private var activeActionTime: Float = 0f
+    private var activeActionRate: Float = 1.2f
+    private var activeActionEndTime: Float = 0f
+
+    // True incremental per-frame asset loader (eliminates 5-10s lobby-to-loading hang!)
+    private var loadStage: Int = 0
+    private var coreTexLoadIdx: Int = 0
+    private var coreTexLoadSteps: List<() -> Unit> = emptyList()
+    private var playerClipLoadIdx: Int = 0
+    private var warmupFramesRendered: Int = 0
+    private var worldReadyReported: Boolean = false
     private var lastGateAudioTime = -10f
+    private var lastNpcStreamCheckTime = 0f
+    private var lastTrafficRelocateTime = 0f
+    private var aiRngState: Int = 7391521
+
+    private fun nextAiRand(): Float {
+        aiRngState = aiRngState * 1103515245 + 12345
+        return ((aiRngState ushr 16) and 0x7FFF) / 32767f
+    }
 
     // Time-of-Day & Weather Cycle
     private var timeOfDay = 0.36f // 0=midnight, 0.25=sunrise, 0.5=noon, 0.75=sunset
@@ -168,6 +248,8 @@ class OpenGLCityRenderer(
 
     private val collectedOrbs = HashSet<Int>()
     private val discoveredZones = HashSet<String>()
+    private var cachedCollectedOrbsSnapshot: Set<Int> = emptySet()
+    private var cachedDiscoveredZonesSnapshot: Set<String> = emptySet()
     private val enterableBuildings = CityWorldData.createEnterableBuildings()
     private val roadsideShops = CityWorldData.createRoadsideShops()
     private val parkedCars = CityWorldData.createParkedCars()
@@ -178,8 +260,15 @@ class OpenGLCityRenderer(
     private val flyingBirds = CityWorldData.createFlyingBirds()
     private var chunkGrid = CityWorldData.buildChunkGrid(enterableBuildings, roadsideShops)
 
-    // Pre-allocated per-frame visible chunk & shadow lists (zero GC churn)
+    // Pre-allocated per-frame visible chunk, O(1) dedup sets & shadow lists (zero GC churn)
     private val activeChunks = ArrayList<WorldChunk>(48)
+    private val seenBuildings = HashSet<BuildingBlock>(48)
+    private val seenEnterables = HashSet<EnterableBuilding>(12)
+    private val seenRoadsideShops = HashSet<RoadsideShopProp>(12)
+    private val seenPortContainers = HashSet<PortContainerProp>(24)
+    private val seenArmyBunkers = HashSet<ArmyBunkerProp>(8)
+    private val seenBarbedFences = HashSet<BarbedFenceSegment>(16)
+    private val seenArmyVehicles = HashSet<ArmyVehicleProp>(8)
     private val visBuildings = ArrayList<BuildingBlock>(32)
     private val visEnterables = ArrayList<EnterableBuilding>(8)
     private val visRoadsideShops = ArrayList<RoadsideShopProp>(8)
@@ -212,31 +301,47 @@ class OpenGLCityRenderer(
         resetQueued = true
     }
 
+    private fun applyInitialSpawnAndConditions() {
+        playerX = spawnX
+        playerZ = spawnZ
+        playerY = WorldMapData.getTerrainHeight(playerX, playerZ)
+        isInWaterNow = false
+        currentWaterWarning = null
+        playerSlopePitchDeg = 0f
+        playerSlopeRollDeg = 0f
+        timeOfDay = if (initialNightMode) 0.96f else 0.36f
+        nightFactor = if (initialNightMode) 1f else 0f
+        weatherState = if (initialRainMode) WeatherState.RAIN else WeatherState.CLEAR
+        rainIntensity = if (initialRainMode) 1f else 0f
+        roadWetness = if (initialRainMode) 0.85f else 0f
+    }
+
     private fun performReset() {
-        playerX = 0f
-        playerY = 0f
-        playerZ = 8.2f
+        applyInitialSpawnAndConditions()
         playerVelY = 0f
         isGrounded = true
         playerFacingYaw = PI.toFloat()
         drivenCar = null
+        drivenAiCar = null
         riddenBike = null
+        lastPlayerVehX = null
+        lastPlayerVehZ = null
         vehicleSpeed = 0f
+        vehicleVelY = 0f
+        vehicleGrounded = true
         cameraYaw = 0f
         cameraPitch = 0.22f
         currentCamDist = 4.6f
         currentBuilding = null
         currentFloorNumber = 0
-        timeOfDay = 0.36f
-        weatherState = WeatherState.CLEAR
-        rainIntensity = 0f
-        roadWetness = 0f
         stamina = 100f
         health = 100f
         sessionScore = 0
         totalDistance = 0f
         collectedOrbs.clear()
         discoveredZones.clear()
+        cachedCollectedOrbsSnapshot = emptySet()
+        cachedDiscoveredZonesSnapshot = emptySet()
         enterableBuildings.clear()
         enterableBuildings.addAll(CityWorldData.createEnterableBuildings())
         roadsideShops.clear()
@@ -254,12 +359,29 @@ class OpenGLCityRenderer(
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        GLES20.glClearColor(0.47f, 0.72f, 0.94f, 1.0f)
+        // Lightweight instant GPU init (<20ms): compile shaders & basic meshes only.
+        // All heavy textures, 6 GLB animations, 18-asset grass & 3D terrain chunks load incrementally
+        // across frames in onDrawFrame() so the loading screen appears IMMEDIATELY with ZERO hang!
+        loadStage = 0
+        coreTexLoadIdx = 0
+        playerClipLoadIdx = 0
+        warmupFramesRendered = 0
+        worldReadyReported = false
+        glbPlayer = null
+        grassSystem = null
+        terrainChunkManager = null
+        applyInitialSpawnAndConditions()
+        listener.onWorldLoadProgress(0.05f, "Initializing 3D Graphics Engine...")
+
+        GLES20.glClearColor(0.04f, 0.06f, 0.10f, 1.0f)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glEnable(GLES20.GL_CULL_FACE)
         GLES20.glCullFace(GLES20.GL_BACK)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+
+        val whiteTex = GlTextureHelper.createSolidWhiteTexture()
+        val multiAngleMgr = MultiAngleTextureManager(context, fallbackTex = whiteTex)
 
         assets = CityRenderAssets(
             shader = CityShaderProgram(),
@@ -273,70 +395,76 @@ class OpenGLCityRenderer(
             carCabinMesh = GlMeshFactory.createSlopedCarCabin(),
             ringMesh = GlMeshFactory.createGroundRing(segments = 60, innerRatio = 0.985f),
             crossedLeafMesh = GlMeshFactory.createCrossedLeafCluster(),
-            texBuilding = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_building, repeat = true),
-            texRoad = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_road, repeat = true),
-            texGrass = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_grass, repeat = true),
-            texBark = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_bark, repeat = true),
-            texLeafCluster = GlTextureHelper.loadLeafBranchClusterTexture(context, R.drawable.img_tex_leaves),
-            texInteriorFloor = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_interior_floor, repeat = true),
-            texConcrete = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_concrete, repeat = true),
-            texWhite = GlTextureHelper.createSolidWhiteTexture(),
+            texBuilding = whiteTex,
+            texRoad = whiteTex,
+            texGrass = whiteTex,
+            texBark = whiteTex,
+            texLeafCluster = whiteTex,
+            texInteriorFloor = whiteTex,
+            texConcrete = whiteTex,
+            texWhite = whiteTex,
             playerHeadMesh = GlMeshFactory.createSculptedHeadMesh(),
             playerTorsoMesh = GlMeshFactory.createSculptedTorsoMesh(),
-            texPlayerFace = GlTextureHelper.loadPlayerFaceTexture(context, R.drawable.img_player_face),
-            texPlayerShirt = GlTextureHelper.createGreenShirtTexture(),
-            texPlayerJeans = GlTextureHelper.createDenimJeansTexture(),
+            texPlayerFace = whiteTex,
+            texPlayerShirt = whiteTex,
+            texPlayerJeans = whiteTex,
             verticalQuadMesh = GlMeshFactory.createVerticalQuad(),
             crossedGrassMesh = GlMeshFactory.createCrossedGrassMesh(),
             skyDomeMesh = GlMeshFactory.createSkyDomeMesh(),
-            // Batch 1 custom textures
-            texAirportRunway = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_airport_runway, repeat = false),
-            tex3dGrassBlades = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_3d_grass_blades, repeat = false),
-            texArmyBarbedFence = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_army_barbed_fence, repeat = true, repeatY = false),
-            texArmyCamo = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_army_camouflage, repeat = true),
-            texArmyHelipad = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_army_helipad, repeat = false),
-            texArmyBunkerConcrete = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_army_bunker_concrete, repeat = true),
-            texBuildingGlassFacade = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_building_glass_facade, repeat = true),
-            texBirdFeathers = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_bird_feathers, repeat = false),
-            texBulletBikeTank = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_bullet_bike_tank, repeat = false),
-            texEnvCloudPuff = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_cloud_puff, repeat = false),
-            // Batch 2: Sky & Weather (5)
-            texEnvSkyDay = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_sky_day, repeat = true, repeatY = false),
-            texEnvSkyNight = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_sky_night, repeat = true, repeatY = false),
-            texEnvSunGlow = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_sun_glow, repeat = false),
-            texEnvMoon = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_moon, repeat = false),
-            texEnvRainStreaks = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_rain_streaks, repeat = true),
-            // Batch 2: Water & Roads (5)
-            texWaterOcean = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_water_ocean, repeat = true),
-            texWaterNormal = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_water_normal, repeat = true),
-            texRoadAsphaltDetailed = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_road_asphalt_detailed, repeat = true),
-            texIntersectionAsphalt = GlTextureHelper.createCleanIntersectionAsphaltTexture(),
-            texColonyAlley = GlTextureHelper.createColonyAlleyTexture(),
-            texFootpathPaverBlocks = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_footpath_paver_blocks, repeat = true),
-            texWaterRoadPuddleReflect = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_water_road_puddle_reflect, repeat = true),
-            // Batch 2: Trees & Foliage (4)
-            texTreeBark = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_tree_bark, repeat = true),
-            texTreeLeavesBroad = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_tree_leaves_broad, repeat = false),
-            texTreeLeavesPalm = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_tree_leaves_palm, repeat = false),
-            texTreeLeavesPine = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_tree_leaves_pine, repeat = false),
-            // Batch 2: Buildings, Shops & Interiors (6)
-            texHouseRedBrick = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_house_red_brick, repeat = true),
-            texHouseExteriorWindows = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_house_exterior_windows, repeat = true),
-            texShopShutter = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_shop_shutter, repeat = false),
-            texInteriorWallPaint = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_interior_wall_paint, repeat = true),
-            texInteriorWoodFloor = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_interior_wood_floor, repeat = true),
-            texInteriorMarbleTiles = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_interior_marble_tiles, repeat = true),
-            // Batch 2: Industrial, Port & Vehicles (3)
-            texFactoryCorrugatedMetal = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_factory_corrugated_metal, repeat = true),
-            texPortContainerSteel = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_port_container_steel, repeat = true),
-            texVehicleTireTread = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_vehicle_tire_tread, repeat = true),
-            // Batch 3: Complete 80-Texture Realistic Multi-Angle Pack + Split Cylinder VBO
             splitCylinderMesh = GlMeshFactory.createSplitCylinder(segments = 16),
             splitCylinderSegments = 16,
-            multiAngle = MultiAngleTextureManager(context)
+            multiAngle = multiAngleMgr
         )
         dc = GlDrawContext(assets)
-        glbPlayer = GlbSkinnedPlayer.loadFromAssets(context, "player.glb", assets.texWhite)
+
+        // Queue core world textures to decode incrementally (5 per frame -> zero stutter!)
+        coreTexLoadSteps = listOf(
+            { assets.texBuilding = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_building, repeat = true) },
+            { assets.texRoad = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_road, repeat = true) },
+            { assets.texGrass = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_grass, repeat = true) },
+            { assets.texBark = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_bark, repeat = true) },
+            { assets.texLeafCluster = GlTextureHelper.loadLeafBranchClusterTexture(context, R.drawable.img_tex_leaves) },
+            { assets.texInteriorFloor = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_interior_floor, repeat = true) },
+            { assets.texConcrete = GlTextureHelper.loadDrawableTexture(context, R.drawable.img_tex_concrete, repeat = true) },
+            { assets.texPlayerFace = GlTextureHelper.loadPlayerFaceTexture(context, R.drawable.img_player_face) },
+            { assets.texPlayerShirt = GlTextureHelper.createGreenShirtTexture() },
+            { assets.texPlayerJeans = GlTextureHelper.createDenimJeansTexture() },
+            { assets.texAirportRunway = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_airport_runway, repeat = false) },
+            { assets.tex3dGrassBlades = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_3d_grass_blades, repeat = false) },
+            { assets.texArmyBarbedFence = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_army_barbed_fence, repeat = true, repeatY = false) },
+            { assets.texArmyCamo = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_army_camouflage, repeat = true) },
+            { assets.texArmyHelipad = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_army_helipad, repeat = false) },
+            { assets.texArmyBunkerConcrete = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_army_bunker_concrete, repeat = true) },
+            { assets.texBuildingGlassFacade = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_building_glass_facade, repeat = true) },
+            { assets.texBirdFeathers = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_bird_feathers, repeat = false) },
+            { assets.texBulletBikeTank = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_bullet_bike_tank, repeat = false) },
+            { assets.texEnvCloudPuff = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_cloud_puff, repeat = false) },
+            { assets.texEnvSkyDay = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_sky_day, repeat = true, repeatY = false) },
+            { assets.texEnvSkyNight = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_sky_night, repeat = true, repeatY = false) },
+            { assets.texEnvSunGlow = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_sun_glow, repeat = false) },
+            { assets.texEnvMoon = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_moon, repeat = false) },
+            { assets.texEnvRainStreaks = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_env_rain_streaks, repeat = true) },
+            { assets.texWaterOcean = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_water_ocean, repeat = true) },
+            { assets.texWaterNormal = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_water_normal, repeat = true) },
+            { assets.texRoadAsphaltDetailed = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_road_asphalt_detailed, repeat = true) },
+            { assets.texIntersectionAsphalt = GlTextureHelper.createCleanIntersectionAsphaltTexture() },
+            { assets.texColonyAlley = GlTextureHelper.createColonyAlleyTexture() },
+            { assets.texFootpathPaverBlocks = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_footpath_paver_blocks, repeat = true) },
+            { assets.texWaterRoadPuddleReflect = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_water_road_puddle_reflect, repeat = true) },
+            { assets.texTreeBark = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_tree_bark, repeat = true) },
+            { assets.texTreeLeavesBroad = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_tree_leaves_broad, repeat = false) },
+            { assets.texTreeLeavesPalm = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_tree_leaves_palm, repeat = false) },
+            { assets.texTreeLeavesPine = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_tree_leaves_pine, repeat = false) },
+            { assets.texHouseRedBrick = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_house_red_brick, repeat = true) },
+            { assets.texHouseExteriorWindows = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_house_exterior_windows, repeat = true) },
+            { assets.texShopShutter = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_shop_shutter, repeat = false) },
+            { assets.texInteriorWallPaint = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_interior_wall_paint, repeat = true) },
+            { assets.texInteriorWoodFloor = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_interior_wood_floor, repeat = true) },
+            { assets.texInteriorMarbleTiles = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_interior_marble_tiles, repeat = true) },
+            { assets.texFactoryCorrugatedMetal = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_factory_corrugated_metal, repeat = true) },
+            { assets.texPortContainerSteel = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_port_container_steel, repeat = true) },
+            { assets.texVehicleTireTread = GlTextureHelper.loadDrawableTexture(context, R.drawable.tex_vehicle_tire_tread, repeat = true) }
+        )
 
         lastFrameNs = System.nanoTime()
         fpsWindowStartNs = lastFrameNs
@@ -345,14 +473,127 @@ class OpenGLCityRenderer(
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         GLES20.glViewport(0, 0, width, height)
         val aspect = if (height > 0) width.toFloat() / height.toFloat() else 1.77f
-        // Near plane 0.45f doubles depth-buffer precision across the city, preventing distant Z-fighting
-        Matrix.perspectiveM(dc.projMatrix, 0, 56f, aspect, 0.45f, 340f)
+        // Near plane 0.55f + far 1050f showcases distant snow peaks & island horizons with zero Z-fighting
+        Matrix.perspectiveM(dc.projMatrix, 0, 56f, aspect, 0.55f, 1050f)
+    }
+
+    private fun stepIncrementalWorldLoading() {
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+        when (loadStage) {
+            // Stage 0: Core world textures (5 per frame) -> 0.05..0.24
+            0 -> {
+                val end = (coreTexLoadIdx + 5).coerceAtMost(coreTexLoadSteps.size)
+                while (coreTexLoadIdx < end) {
+                    coreTexLoadSteps[coreTexLoadIdx].invoke()
+                    coreTexLoadIdx++
+                }
+                val frac = coreTexLoadIdx.toFloat() / coreTexLoadSteps.size.coerceAtLeast(1)
+                listener.onWorldLoadProgress(0.05f + frac * 0.19f, "Loading World Textures ($coreTexLoadIdx/${coreTexLoadSteps.size})...")
+                if (coreTexLoadIdx >= coreTexLoadSteps.size) loadStage = 1
+            }
+            // Stage 1: Multi-Angle 80-texture pack (6 per frame) -> 0.24..0.50
+            1 -> {
+                val mgr = assets.multiAngle
+                if (mgr != null) {
+                    val (done, total) = mgr.stepLoadBatch(batchSize = 6)
+                    val frac = done.toFloat() / total.coerceAtLeast(1)
+                    listener.onWorldLoadProgress(0.24f + frac * 0.26f, "Loading City Buildings & Props ($done/$total)...")
+                    if (done >= total) loadStage = 2
+                } else {
+                    loadStage = 2
+                }
+            }
+            // Stage 2: Player GLB base mesh + 5 .sanim motion clips (1 per frame!) -> 0.50..0.60
+            2 -> {
+                if (glbPlayer == null && playerClipLoadIdx == 0) {
+                    glbPlayer = GlbSkinnedPlayer.loadBaseFromAssets(context, "playerstand.glb", assets.texWhite)
+                    listener.onWorldLoadProgress(0.52f, "Loading Player Character Rig...")
+                    if (glbPlayer == null) {
+                        loadStage = 3
+                    } else {
+                        playerClipLoadIdx = 1
+                    }
+                } else {
+                    val clipIdx = playerClipLoadIdx - 1
+                    glbPlayer?.loadExtraClipStep(context, clipIdx)
+                    val totalClips = GlbSkinnedPlayer.extraClipCount
+                    val frac = playerClipLoadIdx.toFloat() / totalClips.coerceAtLeast(1)
+                    listener.onWorldLoadProgress(0.52f + frac * 0.08f, "Loading Player Animations ($playerClipLoadIdx/$totalClips)...")
+                    playerClipLoadIdx++
+                    if (clipIdx + 1 >= totalClips) loadStage = 3
+                }
+            }
+            // Stage 3: Init 18-Asset Grass Engine (1 frame) -> 0.63
+            3 -> {
+                grassSystem = RealisticGrassSystem(context)
+                listener.onWorldLoadProgress(0.63f, "Packing 18-Type 3D Foliage Atlas...")
+                loadStage = 4
+            }
+            // Stage 4: Init 50km x 65km Multi-Island Terrain Engine (1 frame) -> 0.66
+            4 -> {
+                terrainChunkManager = WorldTerrainChunkManager()
+                listener.onWorldLoadProgress(0.66f, "Initializing 50 km × 65 km Multi-Island World...")
+                loadStage = 5
+            }
+            // Stage 5: Bake GTA-6 Satellite Map Bitmap off UI thread (1 frame) -> 0.70
+            5 -> {
+                WorldMapData.getOrCreateSatelliteBitmap()
+                listener.onWorldLoadProgress(0.70f, "Building Satellite Map Radar...")
+                loadStage = 6
+            }
+            // Stage 6: Pre-bake nearby 3D terrain chunks (2 per frame) -> 0.70..0.82
+            6 -> {
+                val (done, total) = terrainChunkManager?.prewarmStep(
+                    centerX = playerX,
+                    centerZ = playerZ,
+                    graphicsQuality = graphicsQuality,
+                    maxChunksPerStep = 2
+                ) ?: (1 to 1)
+                val frac = (done.toFloat() / total.coerceAtLeast(1)).coerceIn(0f, 1f)
+                listener.onWorldLoadProgress(0.70f + frac * 0.12f, "Streaming 3D Terrain & Highways ($done/$total)...")
+                if (done >= total) loadStage = 7
+            }
+            // Stage 7: Pre-bake nearby 18-asset grass chunks (3 per frame; skipped when grass OFF!) -> 0.82..0.94
+            7 -> {
+                val (done, total) = grassSystem?.prewarmStep(
+                    centerX = playerX,
+                    centerZ = playerZ,
+                    graphicsQuality = graphicsQuality,
+                    grassDensity = grassDensity,
+                    maxChunksPerStep = 3
+                ) ?: (1 to 1)
+                val frac = (done.toFloat() / total.coerceAtLeast(1)).coerceIn(0f, 1f)
+                listener.onWorldLoadProgress(0.82f + frac * 0.12f, "Growing 3D Biome Foliage ($done/$total)...")
+                if (done >= total) loadStage = 8
+            }
+            // Stage 8: Warm up GPU shader pipelines with 3 real frames -> 0.94..1.00
+            else -> {
+                renderScene()
+                warmupFramesRendered++
+                val warmFrac = (warmupFramesRendered / 3f).coerceIn(0f, 1f)
+                if (warmupFramesRendered < 3) {
+                    listener.onWorldLoadProgress(0.94f + warmFrac * 0.05f, "Warming Up 60 FPS GPU Shaders...")
+                } else {
+                    worldReadyReported = true
+                    lastFrameNs = System.nanoTime()
+                    fpsWindowStartNs = lastFrameNs
+                    fpsFrameCount = 0
+                    listener.onWorldLoadProgress(1.0f, "Deploying to Saini City...")
+                    listener.onWorldReady()
+                }
+            }
+        }
     }
 
     override fun onDrawFrame(gl: GL10?) {
         val nowNs = System.nanoTime()
         val dt = ((nowNs - lastFrameNs) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
         lastFrameNs = nowNs
+
+        if (!worldReadyReported) {
+            stepIncrementalWorldLoading()
+            return
+        }
 
         fpsFrameCount++
         val elapsedFpsNs = nowNs - fpsWindowStartNs
@@ -382,7 +623,7 @@ class OpenGLCityRenderer(
             input.toggleDayNightQueued = false
             timeOfDay = if (nightFactor > 0.45f) 0.44f else 0.96f
             listener.onInteractMessage(if (timeOfDay > 0.75f) "Night Mode — City Lights & Moon Active" else "Daylight Mode — Sunlit Sky Active")
-        } else {
+        } else if (dynamicDayNight) {
             timeOfDay = (timeOfDay + dt / 240f) % 1f
         }
         val sunAngleRad = (timeOfDay - 0.25f) * 2f * PI.toFloat()
@@ -443,7 +684,8 @@ class OpenGLCityRenderer(
         cameraYaw -= yawDelta * 0.0045f * cameraSensitivity
         val minPitch = if (currentBuilding != null) -0.22f else -0.55f
         val maxPitch = if (currentBuilding != null) 0.58f else 1.28f
-        cameraPitch = (cameraPitch + pitchDelta * 0.0038f * cameraSensitivity).coerceIn(minPitch, maxPitch)
+        val pitchSign = if (invertCameraY) -1f else 1f
+        cameraPitch = (cameraPitch + pitchDelta * pitchSign * 0.0038f * cameraSensitivity).coerceIn(minPitch, maxPitch)
 
         val interactNow = input.interactQueued
         input.interactQueued = false
@@ -454,7 +696,7 @@ class OpenGLCityRenderer(
         var interactConsumed = false
 
         // --- 1. Hand-Controlled Interactive Gate System (All 4 Mechanisms + Stop/Leave-Anywhere) ---
-        val inVehicle = drivenCar != null || riddenBike != null
+        val inVehicle = drivenCar != null || drivenAiCar != null || riddenBike != null
         var closestGate: InteractiveGate? = null
         var closestGateDist = 3.25f
 
@@ -548,57 +790,138 @@ class OpenGLCityRenderer(
         var wantsSprint = false
 
         val activeCar = drivenCar
+        val activeAiCar = drivenAiCar
         val activeBike = riddenBike
+        val isDrivingCar = activeCar != null || activeAiCar != null
 
-        if (activeCar != null || activeBike != null) {
-            nearestInteract = if (activeCar != null) "Exit Sports Car" else "Dismount Bullet 350"
-            if (hornNow && activeCar != null) {
+        if (isDrivingCar || activeBike != null) {
+            nearestInteract = when {
+                activeAiCar != null -> "Exit Traffic Car"
+                activeCar != null -> "Exit Sports Car"
+                else -> "Dismount Bullet 350"
+            }
+            if (hornNow && isDrivingCar) {
                 listener.onCarHorn()
+                // Honking scares nearby NPCs so they sprint out of the road!
+                for (npc in npcs) {
+                    val ndx = npc.x - playerX
+                    val ndz = npc.z - playerZ
+                    if (ndx * ndx + ndz * ndz < 14f * 14f) {
+                        npc.fleeTimer = 3.8f
+                        npc.fleeFromX = playerX
+                        npc.fleeFromZ = playerZ
+                        npc.pauseTimer = 0f
+                    }
+                }
             }
             if (interactNow && !interactConsumed) {
                 interactConsumed = true
-                val yawRad = (if (activeCar != null) activeCar.yawDeg else activeBike!!.yawDeg) * PI.toFloat() / 180f
-                val sideDist = if (activeCar != null) 2.2f else 1.45f
+                val vehYawDeg = when {
+                    activeCar != null -> activeCar.yawDeg
+                    activeAiCar != null -> activeAiCar.yawDeg
+                    else -> activeBike!!.yawDeg
+                }
+                val yawRad = vehYawDeg * PI.toFloat() / 180f
+                val sideDist = if (isDrivingCar) 2.2f else 1.45f
                 val exitResolved = CityWorldData.resolvePlayerPhysics(
                     nextX = playerX + cos(yawRad) * sideDist,
                     nextZ = playerZ - sin(yawRad) * sideDist,
-                    currentY = 0f,
+                    currentY = playerY,
                     enterableBuildings = enterableBuildings,
                     movingCars = cars,
                     npcs = npcs,
                     activeParkedCars = parkedCars,
                     activeBulletBikes = bulletBikes,
                     activeShops = roadsideShops,
-                    chunkGrid = chunkGrid
+                    ignoreCar = activeCar,
+                    ignoreAiCar = activeAiCar,
+                    ignoreBike = activeBike,
+                    chunkGrid = chunkGrid,
+                    prevX = playerX,
+                    prevZ = playerZ,
+                    chopperLiftY = chopperLiftY
                 )
                 playerX = exitResolved.x
                 playerZ = exitResolved.z
                 playerY = exitResolved.supportFloorY
+                playerVelY = 0f
+                isGrounded = true
+                // Permanent Player Vehicle Persistence: NEVER despawn or vanish the player's left-behind vehicle!
+                when {
+                    activeCar != null -> {
+                        activeCar.isPlayerOwned = true
+                        lastPlayerVehX = activeCar.x
+                        lastPlayerVehZ = activeCar.z
+                    }
+                    activeAiCar != null -> {
+                        // Convert hijacked AI traffic car into a permanent player-owned ParkedCar so it NEVER vanishes!
+                        val savedCar = ParkedCar(
+                            x = activeAiCar.x,
+                            z = activeAiCar.z,
+                            yawDeg = activeAiCar.yawDeg,
+                            r = activeAiCar.r,
+                            g = activeAiCar.g,
+                            b = activeAiCar.b,
+                            wheelAngleDeg = activeAiCar.wheelAngleDeg,
+                            pitchDeg = activeAiCar.pitchDeg,
+                            rollDeg = activeAiCar.rollDeg,
+                            isPlayerOwned = true
+                        )
+                        parkedCars.add(savedCar)
+                        lastPlayerVehX = savedCar.x
+                        lastPlayerVehZ = savedCar.z
+                        // Recycle the AI slot far away so traffic continues flowing naturally
+                        activeAiCar.isPlayerControlled = false
+                        activeAiCar.isTurning = false
+                        activeAiCar.parkedAfterExitTimer = 0f
+                        activeAiCar.currentSpeed = activeAiCar.baseSpeed * 0.7f
+                        activeAiCar.x = activeAiCar.x + 260f
+                        activeAiCar.z = activeAiCar.z + 260f
+                    }
+                    activeBike != null -> {
+                        activeBike.isPlayerOwned = true
+                        activeBike.steerDeg = 0f
+                        lastPlayerVehX = activeBike.x
+                        lastPlayerVehZ = activeBike.z
+                    }
+                }
                 drivenCar = null
+                drivenAiCar = null
                 riddenBike = null
                 vehicleSpeed = 0f
-                if (activeCar != null) {
+                vehicleVelY = 0f
+                vehicleGrounded = true
+                if (isDrivingCar) {
                     listener.onCarExited()
-                    listener.onInteractMessage("Exited Car")
+                    listener.onInteractMessage("Car Parked — Saved Permanently on Map")
                 } else {
-                    listener.onInteractMessage("Dismounted Bullet 350")
+                    listener.onInteractMessage("Bullet 350 Parked — Saved Permanently on Map")
                 }
             } else {
-                val isCar = activeCar != null
-                val maxFwd = (if (isCar) 20f else 18f) * (if (input.isSprinting) 1.38f else 1f)
-                val maxRev = if (isCar) -7.5f else -4.5f
-                val accel = if (isCar) 15f else 18f
-                val throttle = -rawY
+                val isCar = isDrivingCar
+                val onBridgeNow = WorldMapData.isOnBridge(playerX, playerZ)
+                val waterDepthStart = if (onBridgeNow) 0f else WorldMapData.getWaterDepth(playerX, playerZ)
+                val waterSpeedMult = when {
+                    waterDepthStart > 0.78f -> 0.34f
+                    waterDepthStart > 0.22f -> 0.66f
+                    else -> 1.0f
+                }
+                val maxFwd = (if (isCar) 24f else 21f) * (if (input.isSprinting) 1.45f else 1f) * waterSpeedMult
+                val maxRev = (if (isCar) -7.5f else -4.5f) * waterSpeedMult
+                val accel = (if (isCar) 15.5f else 18.5f) * waterSpeedMult
+                // Blend dedicated Vehicle Steer/Pedals buttons cleanly with joystick/keyboard!
+                val steerInput = (if (abs(input.vehSteer) > 0.05f) input.vehSteer else rawX).coerceIn(-1f, 1f)
+                val throttle = (if (abs(input.vehThrottle) > 0.05f) input.vehThrottle else -rawY).coerceIn(-1f, 1f)
                 val prevSpeed = vehicleSpeed
 
                 // Detect hard acceleration / engine revving in car
-                if (isCar && ((throttle > 0.72f && prevSpeed in 0.2f..5.5f) || (input.isSprinting && throttle > 0.55f)) && worldTime - lastCarRevTime > 2.4f) {
+                if (isCar && vehicleGrounded && ((throttle > 0.72f && prevSpeed in 0.2f..5.5f) || (input.isSprinting && throttle > 0.55f)) && worldTime - lastCarRevTime > 2.4f) {
                     lastCarRevTime = worldTime
                     listener.onCarAccelerateRev()
                 }
 
                 // Detect emergency braking / tire skid at speed
-                val isEmergencyBraking = isCar && ((throttle < -0.42f && prevSpeed > 8.5f) || (abs(rawX) > 0.78f && prevSpeed > 13.5f))
+                val isEmergencyBraking = isCar && vehicleGrounded && ((throttle < -0.42f && prevSpeed > 8.5f) || (abs(steerInput) > 0.78f && prevSpeed > 13.5f))
                 if (isEmergencyBraking) {
                     lastHardBrakeTime = worldTime
                     if (worldTime - lastCarSkidTime > 1.8f) {
@@ -607,41 +930,70 @@ class OpenGLCityRenderer(
                     }
                 }
 
-                if (abs(throttle) > 0.08f) {
-                    vehicleSpeed = (vehicleSpeed + throttle * accel * dt).coerceIn(maxRev, maxFwd)
+                if (vehicleGrounded) {
+                    if (abs(throttle) > 0.08f) {
+                        vehicleSpeed = (vehicleSpeed + throttle * accel * dt).coerceIn(maxRev, maxFwd)
+                    } else {
+                        val dragRate = if (waterDepthStart > 0.22f) 6.5f else 3.8f
+                        val drag = (1f - dt * dragRate).coerceAtLeast(0f)
+                        vehicleSpeed *= drag
+                        if (abs(vehicleSpeed) < 0.08f) vehicleSpeed = 0f
+                    }
                 } else {
-                    val drag = (1f - dt * 3.8f).coerceAtLeast(0f)
-                    vehicleSpeed *= drag
-                    if (abs(vehicleSpeed) < 0.08f) vehicleSpeed = 0f
+                    // Slight air drag while airborne off ramps/bridges
+                    vehicleSpeed *= (1f - dt * 0.25f).coerceAtLeast(0f)
                 }
 
-                val steerFactor = (abs(vehicleSpeed) / 4.0f).coerceIn(0.25f, 1.0f) * (if (vehicleSpeed >= -0.1f) 1f else -1f)
+                val steerFactor = (abs(vehicleSpeed) / 4.0f).coerceIn(0.25f, 1.0f) * (if (vehicleSpeed >= -0.1f) 1f else -1f) * (if (vehicleGrounded) 1f else 0.20f)
                 val turnRateDeg = if (isCar) 115f else 142f
-                val curYawDeg = if (isCar) activeCar!!.yawDeg else activeBike!!.yawDeg
-                val nextYawDeg = (curYawDeg - rawX * turnRateDeg * steerFactor * dt) % 360f
+                val curYawDeg = when {
+                    activeCar != null -> activeCar.yawDeg
+                    activeAiCar != null -> activeAiCar.yawDeg
+                    else -> activeBike!!.yawDeg
+                }
+                val nextYawDeg = (curYawDeg - steerInput * turnRateDeg * steerFactor * dt) % 360f
                 val rad = nextYawDeg * PI.toFloat() / 180f
-                val curX = if (isCar) activeCar!!.x else activeBike!!.x
-                val curZ = if (isCar) activeCar!!.z else activeBike!!.z
+                val curX = when {
+                    activeCar != null -> activeCar.x
+                    activeAiCar != null -> activeAiCar.x
+                    else -> activeBike!!.x
+                }
+                val curZ = when {
+                    activeCar != null -> activeCar.z
+                    activeAiCar != null -> activeAiCar.z
+                    else -> activeBike!!.z
+                }
                 val nextX = curX + sin(rad) * vehicleSpeed * dt
                 val nextZ = curZ + cos(rad) * vehicleSpeed * dt
+                val vehRadius = if (isCar) 1.35f else 0.72f
 
                 val resolved = CityWorldData.resolvePlayerPhysics(
                     nextX = nextX,
                     nextZ = nextZ,
-                    currentY = 0f,
+                    currentY = playerY,
                     enterableBuildings = enterableBuildings,
                     movingCars = cars,
                     npcs = npcs,
-                    playerRadius = if (isCar) 1.35f else 0.72f,
+                    playerRadius = vehRadius,
                     activeParkedCars = parkedCars,
                     activeBulletBikes = bulletBikes,
                     activeShops = roadsideShops,
                     ignoreCar = activeCar,
+                    ignoreAiCar = activeAiCar,
                     ignoreBike = activeBike,
-                    chunkGrid = chunkGrid
+                    chunkGrid = chunkGrid,
+                    prevX = curX,
+                    prevZ = curZ,
+                    isAirborne = !vehicleGrounded,
+                    chopperLiftY = chopperLiftY
                 )
-                val movedDx = resolved.x - curX
-                val movedDz = resolved.z - curZ
+                // Also prevent vehicles from passing through regional forest trees!
+                val treeAdj = terrainChunkManager?.resolveRegionalTreeCollisions(resolved.x, resolved.z, playerY, vehRadius)
+                val finalVehX = treeAdj?.first ?: resolved.x
+                val finalVehZ = treeAdj?.second ?: resolved.z
+
+                val movedDx = finalVehX - curX
+                val movedDz = finalVehZ - curZ
                 val movedDist = sqrt(movedDx * movedDx + movedDz * movedDz)
                 totalDistance += movedDist
                 val impactSpeed = abs(vehicleSpeed)
@@ -658,20 +1010,85 @@ class OpenGLCityRenderer(
                     vehicleSpeed *= 0.25f // Solid collision rebound damping
                 }
 
-                if (isCar) {
-                    activeCar!!.x = resolved.x
-                    activeCar.z = resolved.z
-                    activeCar.yawDeg = nextYawDeg
-                    activeCar.wheelAngleDeg = (activeCar.wheelAngleDeg + vehicleSpeed * dt * 165f) % 360f
+                // 3D Multi-Wheel Slope Pitch, Roll & Elevation Sampling (eliminates nose-clipping on ramps/hills/bridges!)
+                val halfWb = if (isCar) 1.38f else 0.72f
+                val halfTr = if (isCar) 0.88f else 0.32f
+                val orient = sampleVehicleOrientation(finalVehX, finalVehZ, nextYawDeg, halfWb, halfTr)
+                val supportY = maxOf(resolved.supportFloorY, orient.supportY)
+
+                if (!vehicleGrounded) {
+                    playerY += vehicleVelY * dt
+                    if (playerY > peakAirY) peakAirY = playerY
+                    vehicleVelY -= 22f * dt
+                    if (playerY <= supportY) {
+                        val fallHeight = (peakAirY - supportY).coerceAtLeast(0f)
+                        playerY = supportY
+                        vehicleVelY = 0f
+                        vehicleGrounded = true
+                        if (fallHeight >= 2.2f) {
+                            if (isCar) listener.onCarCrash(if (fallHeight >= 4.5f) CarCrashType.HEAVY_IMPACT else CarCrashType.LIGHT_BUMP)
+                            else listener.onPlayerLand(heavy = true)
+                        }
+                        peakAirY = supportY
+                    }
                 } else {
-                    activeBike!!.x = resolved.x
-                    activeBike.z = resolved.z
-                    activeBike.yawDeg = nextYawDeg
-                    activeBike.wheelAngleDeg = (activeBike.wheelAngleDeg + vehicleSpeed * dt * 185f) % 360f
+                    val diffY = supportY - playerY
+                    if (diffY < -0.65f) {
+                        // Drove off a bridge edge, cliff, or elevated ledge -> launch into real 3D free-fall!
+                        vehicleGrounded = false
+                        vehicleVelY = 0f
+                        peakAirY = playerY
+                    } else {
+                        playerY += diffY * (dt * 22f).coerceAtMost(1f)
+                    }
                 }
-                playerX = resolved.x
-                playerZ = resolved.z
-                playerY = 0f
+
+                // Allow entering water freely — show clear HUD water warning instead of teleporting back!
+                val onBridgeAfter = WorldMapData.isOnBridge(finalVehX, finalVehZ)
+                val waterDepthHere = if (onBridgeAfter) 0f else WorldMapData.getWaterDepth(finalVehX, finalVehZ)
+                isInWaterNow = waterDepthHere > 0.16f
+                currentWaterWarning = when {
+                    waterDepthHere > 0.75f -> "WARNING: DEEP WATER — ENGINE FLOODING"
+                    waterDepthHere > 0.16f -> "CAUTION: DRIVING IN WATER"
+                    else -> null
+                }
+
+                val tiltRate = (dt * 10.5f).coerceAtMost(1f)
+                val targetPitch = if (vehicleGrounded) orient.pitchDeg else (vehicleVelY * -1.4f).coerceIn(-24f, 24f)
+                val targetRoll = if (vehicleGrounded) orient.rollDeg else 0f
+
+                when {
+                    activeCar != null -> {
+                        activeCar.x = finalVehX
+                        activeCar.z = finalVehZ
+                        activeCar.yawDeg = nextYawDeg
+                        activeCar.wheelAngleDeg = (activeCar.wheelAngleDeg + vehicleSpeed * dt * 165f) % 360f
+                        activeCar.pitchDeg += (targetPitch - activeCar.pitchDeg) * tiltRate
+                        activeCar.rollDeg += (targetRoll - activeCar.rollDeg) * tiltRate
+                    }
+                    activeAiCar != null -> {
+                        activeAiCar.x = finalVehX
+                        activeAiCar.z = finalVehZ
+                        activeAiCar.yawDeg = nextYawDeg
+                        activeAiCar.targetYawDeg = nextYawDeg
+                        activeAiCar.currentSpeed = abs(vehicleSpeed)
+                        activeAiCar.wheelAngleDeg = (activeAiCar.wheelAngleDeg + vehicleSpeed * dt * 165f) % 360f
+                        activeAiCar.pitchDeg += (targetPitch - activeAiCar.pitchDeg) * tiltRate
+                        activeAiCar.rollDeg += (targetRoll - activeAiCar.rollDeg) * tiltRate
+                    }
+                    else -> {
+                        activeBike!!.x = finalVehX
+                        activeBike.z = finalVehZ
+                        activeBike.yawDeg = nextYawDeg
+                        activeBike.wheelAngleDeg = (activeBike.wheelAngleDeg + vehicleSpeed * dt * 185f) % 360f
+                        activeBike.pitchDeg += (targetPitch - activeBike.pitchDeg) * tiltRate
+                        activeBike.rollDeg += (targetRoll - activeBike.rollDeg) * tiltRate
+                        val desiredSteer = (-steerInput * 24f).coerceIn(-26f, 26f)
+                        activeBike.steerDeg += (desiredSteer - activeBike.steerDeg) * (dt * 12f).coerceAtMost(1f)
+                    }
+                }
+                playerX = finalVehX
+                playerZ = finalVehZ
                 playerFacingYaw = rad
                 currentBuilding = null
                 currentFloorNumber = 0
@@ -681,7 +1098,7 @@ class OpenGLCityRenderer(
                 // 100% free 360-deg look whenever player drags; after 1.65s idle while driving, smoothly
                 // aligns BEHIND vehicle when driving forward (rad + PI) and IN FRONT looking back when reversing (rad)!
                 val timeSinceDrag = worldTime - lastManualCameraDragTime
-                if (timeSinceDrag > 1.65f && abs(vehicleSpeed) > 0.85f) {
+                if (autoCenterVehicleCam && timeSinceDrag > 1.65f && abs(vehicleSpeed) > 0.85f) {
                     val desiredCamYaw = if (vehicleSpeed >= 0f) (rad + PI.toFloat()) else rad
                     val alignRate = if (vehicleSpeed >= 0f) 3.2f else 2.5f
                     cameraYaw = lerpAngle(cameraYaw, desiredCamYaw, (dt * alignRate).coerceAtMost(1f))
@@ -689,11 +1106,18 @@ class OpenGLCityRenderer(
                 }
             }
         } else {
-            // On-Foot Locomotion
-            wantsSprint = input.isSprinting && stamina > 5f && mag > 0.15f
+            // On-Foot Locomotion (with realistic water wading/swimming drag & Auto-Sprint support!)
+            val preWaterDepth = if (WorldMapData.isOnBridge(playerX, playerZ)) 0f else WorldMapData.getWaterDepth(playerX, playerZ)
+            val waterMoveMult = when {
+                preWaterDepth > 1.05f -> 0.56f
+                preWaterDepth > 0.20f -> 0.76f
+                else -> 1.0f
+            }
+            val autoSprintTriggered = autoSprint && mag > 0.84f
+            wantsSprint = (input.isSprinting || autoSprintTriggered) && stamina > 5f && mag > 0.15f && preWaterDepth < 0.85f
             stamina = if (wantsSprint) (stamina - 20f * dt).coerceAtLeast(0f) else (stamina + 18f * dt).coerceAtMost(100f)
 
-            val moveSpeed = (if (wantsSprint) 11.2f else 5.8f) * activeSkin.speedMultiplier
+            val moveSpeed = (if (wantsSprint) 11.2f else 5.8f) * activeSkin.speedMultiplier * waterMoveMult
             var targetX = playerX
             var targetZ = playerZ
             isMovingNow = false
@@ -733,7 +1157,7 @@ class OpenGLCityRenderer(
                 prevSinCycle = 0f
             }
 
-            // Full Solid 3D Physics Collision Resolution
+            // Full Solid 3D Physics Collision Resolution (with climbable crates/boxes/cars & real bridge falls!)
             val resolved = CityWorldData.resolvePlayerPhysics(
                 nextX = targetX,
                 nextZ = targetZ,
@@ -744,24 +1168,33 @@ class OpenGLCityRenderer(
                 activeParkedCars = parkedCars,
                 activeBulletBikes = bulletBikes,
                 activeShops = roadsideShops,
-                chunkGrid = chunkGrid
+                chunkGrid = chunkGrid,
+                prevX = playerX,
+                prevZ = playerZ,
+                isAirborne = !isGrounded,
+                chopperLiftY = chopperLiftY
             )
-            val movedDx = resolved.x - playerX
-            val movedDz = resolved.z - playerZ
+            val treeAdj = terrainChunkManager?.resolveRegionalTreeCollisions(resolved.x, resolved.z, playerY, 0.52f)
+            val finalX = treeAdj?.first ?: resolved.x
+            val finalZ = treeAdj?.second ?: resolved.z
+
+            val movedDx = finalX - playerX
+            val movedDz = finalZ - playerZ
             totalDistance += sqrt(movedDx * movedDx + movedDz * movedDz)
-            playerX = resolved.x
-            playerZ = resolved.z
+            playerX = finalX
+            playerZ = finalZ
             currentBuilding = resolved.insideBuilding
             currentFloorNumber = resolved.floorNumber
 
-            // Detect if player is pushing against a wall/obstacle to trigger Wall Vault on jump!
-            val blockedDist = sqrt((targetX - resolved.x) * (targetX - resolved.x) + (targetZ - resolved.z) * (targetZ - resolved.z))
+            // Detect if player is pushing against a wall/box/car to trigger Wall Vault on jump!
+            val blockedDist = sqrt((targetX - finalX) * (targetX - finalX) + (targetZ - finalZ) * (targetZ - finalZ))
             val isPressedAgainstObstacle = isMovingNow && blockedDist > 0.025f
 
-            // Vertical jump, wall vault & soft/heavy landing detection
+            // Vertical jump, wall vault, combat/parkour actions & soft/heavy landing detection
             if (input.jumpQueued) {
                 input.jumpQueued = false
                 if (isGrounded) {
+                    activeActionClip = null
                     if (isPressedAgainstObstacle) {
                         playerVelY = 10.6f
                         isGrounded = false
@@ -775,7 +1208,104 @@ class OpenGLCityRenderer(
                     }
                 }
             }
-            val supportY = resolved.supportFloorY
+
+            // Trigger real GLB combat & parkour animations (Hand Fight, Leg Fight, Flip, Release)
+            if (isGrounded) {
+                if (input.handFightQueued) {
+                    input.handFightQueued = false
+                    activeActionClip = PlayerAnimClip.HAND_FIGHT
+                    activeActionTime = 0f
+                    activeActionRate = 1.28f
+                    activeActionEndTime = glbPlayer?.getClipDuration(PlayerAnimClip.HAND_FIGHT) ?: 2.17f
+                    listener.onCombatAction(isKick = false)
+                } else if (input.legFightQueued) {
+                    input.legFightQueued = false
+                    activeActionClip = PlayerAnimClip.LEG_FIGHT
+                    activeActionTime = 0f
+                    activeActionRate = 1.22f
+                    activeActionEndTime = glbPlayer?.getClipDuration(PlayerAnimClip.LEG_FIGHT) ?: 1.60f
+                    listener.onCombatAction(isKick = true)
+                } else if (input.flipQueued) {
+                    input.flipQueued = false
+                    activeActionClip = PlayerAnimClip.FLIP
+                    activeActionTime = 0f
+                    activeActionRate = 1.24f
+                    activeActionEndTime = glbPlayer?.getClipDuration(PlayerAnimClip.FLIP) ?: 2.17f
+                    listener.onJumpPerformed()
+                } else if (input.releaseQueued) {
+                    input.releaseQueued = false
+                    activeActionClip = PlayerAnimClip.RELEASE
+                    activeActionTime = 0.04f
+                    activeActionRate = 1.15f
+                    activeActionEndTime = (glbPlayer?.getClipDuration(PlayerAnimClip.RELEASE) ?: 2.0f).coerceAtMost(1.55f)
+                    listener.onPlayerLand(heavy = true)
+                } else if (input.emoteQueued) {
+                    input.emoteQueued = false
+                    val clips = PlayerAnimClip.entries
+                    val chosen = clips[input.emoteClipOrdinal.coerceIn(0, clips.lastIndex)]
+                    activeActionClip = chosen
+                    activeActionTime = 0f
+                    activeActionRate = 1.12f
+                    activeActionEndTime = (glbPlayer?.getClipDuration(chosen) ?: 2.0f).coerceAtMost(2.4f)
+                    listener.onCombatAction(isKick = chosen == PlayerAnimClip.LEG_FIGHT)
+                }
+            } else {
+                input.handFightQueued = false
+                input.legFightQueued = false
+                input.flipQueued = false
+                input.releaseQueued = false
+                input.emoteQueued = false
+            }
+
+            // Advance active one-shot clip and cleanly release back to STAND/RUN when complete (or if player sprints away)
+            val curAct = activeActionClip
+            if (curAct != null) {
+                activeActionTime += dt * activeActionRate
+                val allowMoveCancel = (curAct == PlayerAnimClip.HAND_FIGHT || curAct == PlayerAnimClip.LEG_FIGHT || curAct == PlayerAnimClip.RELEASE) &&
+                    isMovingNow && mag > 0.45f && activeActionTime > 0.42f
+                if (activeActionTime >= activeActionEndTime || allowMoveCancel) {
+                    activeActionClip = null
+                }
+            }
+
+            // Center-of-Mass Multi-Point Foot Grounding & Natural Hill/Ramp Slope Tilt (ZERO foot sinking into hills/dirt!)
+            val terrainCenter = WorldMapData.getTerrainHeight(playerX, playerZ)
+            val onElevatedPropOrIndoor = currentBuilding != null || resolved.supportFloorY > terrainCenter + 0.16f
+            val onBridgeFoot = WorldMapData.isOnBridge(playerX, playerZ)
+            val waterDepthHere = if (onBridgeFoot || onElevatedPropOrIndoor) 0f else WorldMapData.getWaterDepth(playerX, playerZ)
+            val isSwimmingDeep = waterDepthHere > 1.05f && !onBridgeFoot && !onElevatedPropOrIndoor
+
+            val supportY: Float
+            if (isSwimmingDeep) {
+                // Free ocean/river swimming buoyancy: keep player floating smoothly at waterline!
+                supportY = WorldMapData.WATER_LEVEL - 0.86f + sin(worldTime * 2.4f) * 0.045f
+                playerSlopePitchDeg += (0f - playerSlopePitchDeg) * (dt * 8f).coerceAtMost(1f)
+                playerSlopeRollDeg += (0f - playerSlopeRollDeg) * (dt * 8f).coerceAtMost(1f)
+            } else if (onElevatedPropOrIndoor) {
+                supportY = resolved.supportFloorY
+                playerSlopePitchDeg += (0f - playerSlopePitchDeg) * (dt * 10f).coerceAtMost(1f)
+                playerSlopeRollDeg += (0f - playerSlopeRollDeg) * (dt * 10f).coerceAtMost(1f)
+            } else {
+                val footFwdX = sin(playerFacingYaw)
+                val footFwdZ = cos(playerFacingYaw)
+                val footPosX = cos(playerFacingYaw)
+                val footPosZ = -sin(playerFacingYaw)
+                val hF = WorldMapData.getTerrainHeight(playerX + footFwdX * 0.28f, playerZ + footFwdZ * 0.28f)
+                val hB = WorldMapData.getTerrainHeight(playerX - footFwdX * 0.28f, playerZ - footFwdZ * 0.28f)
+                val hL = WorldMapData.getTerrainHeight(playerX + footPosX * 0.22f, playerZ + footPosZ * 0.22f)
+                val hR = WorldMapData.getTerrainHeight(playerX - footPosX * 0.22f, playerZ - footPosZ * 0.22f)
+                val comAvg = terrainCenter * 0.45f + (hF + hB + hL + hR) * 0.1375f
+                supportY = maxOf(resolved.supportFloorY, maxOf(terrainCenter, comAvg))
+                val targetSlopeP = if (isGrounded) {
+                    (-atan2(hF - hB, 0.56f) * 180f / PI.toFloat() * 0.46f).coerceIn(-15f, 15f)
+                } else 0f
+                val targetSlopeR = if (isGrounded) {
+                    (atan2(hL - hR, 0.44f) * 180f / PI.toFloat() * 0.46f).coerceIn(-11f, 11f)
+                } else 0f
+                playerSlopePitchDeg += (targetSlopeP - playerSlopePitchDeg) * (dt * 10f).coerceAtMost(1f)
+                playerSlopeRollDeg += (targetSlopeR - playerSlopeRollDeg) * (dt * 10f).coerceAtMost(1f)
+            }
+
             if (!isGrounded) {
                 playerY += playerVelY * dt
                 if (playerY > peakAirY) peakAirY = playerY
@@ -785,30 +1315,98 @@ class OpenGLCityRenderer(
                     playerY = supportY
                     playerVelY = 0f
                     isGrounded = true
-                    listener.onPlayerLand(heavy = fallHeight >= 2.2f)
+                    val isHeavy = fallHeight >= 2.2f && !isSwimmingDeep
+                    listener.onPlayerLand(heavy = isHeavy)
+                    if (isHeavy) {
+                        // Dramatic superhero/tactical crouch-land absorption using playerrelease.glb!
+                        activeActionClip = PlayerAnimClip.RELEASE
+                        activeActionTime = 0.36f
+                        activeActionRate = 1.25f
+                        activeActionEndTime = 1.38f
+                    }
                     peakAirY = supportY
                 }
             } else {
                 val diffY = supportY - playerY
-                if (abs(diffY) > 1.2f && diffY < 0f) {
+                if (diffY < -0.55f && !isSwimmingDeep) {
+                    // Stepped off a box, crate, car roof, container, ledge, cliff, or bridge -> genuine 3D free-fall!
                     isGrounded = false
                     playerVelY = 0f
                     peakAirY = playerY
+                    activeActionClip = null
                 } else {
-                    playerY += diffY * (dt * 18f).coerceAtMost(1f)
+                    playerY += diffY * (dt * 20f).coerceAtMost(1f)
                 }
+            }
+
+            // Free Water Entry with Clear HUD Warning (NO invisible shoreline walls, NO forced teleport-back!)
+            isInWaterNow = waterDepthHere > 0.16f
+            currentWaterWarning = when {
+                waterDepthHere > 1.05f -> "WARNING: DEEP OCEAN WATER"
+                waterDepthHere > 0.16f -> "CAUTION: ENTERING WATER"
+                else -> null
             }
         }
 
-        // --- 3. Update autonomous NPC Men & Women along sidewalks ---
-        for (npc in npcs) {
-            if (npc.pauseTimer > 0f) {
-                npc.pauseTimer -= dt
-                continue
+        // --- 3. Intelligent Free-Roaming Reactive NPCs (panic/flee from fast cars & honks, ZERO wall clipping!) ---
+        val streamCheckNow = (worldTime - lastNpcStreamCheckTime) > 2.0f
+        if (streamCheckNow) lastNpcStreamCheckTime = worldTime
+        val anyVehicleActive = drivenCar != null || drivenAiCar != null || riddenBike != null
+
+        val maxActiveNpcs = when (npcDensity) {
+            DensityLevel.OFF -> 0
+            DensityLevel.LOW -> (npcs.size / 3).coerceAtLeast(4)
+            DensityLevel.MEDIUM -> (npcs.size * 2 / 3).coerceAtLeast(8)
+            DensityLevel.HIGH -> npcs.size
+        }
+        for (npcIdx in 0 until maxActiveNpcs.coerceAtMost(npcs.size)) {
+            val npc = npcs[npcIdx]
+            // Relocate very distant NPCs (>260m away) into valid walkable spots near the player so all towns feel alive!
+            val distToPlayerSq = (npc.x - playerX) * (npc.x - playerX) + (npc.z - playerZ) * (npc.z - playerZ)
+            if (streamCheckNow && distToPlayerSq > 260f * 260f) {
+                for (attempt in 0 until 6) {
+                    val ang = nextAiRand() * 2f * PI.toFloat()
+                    val rad = 58f + nextAiRand() * 58f
+                    val rx = (playerX + cos(ang) * rad).coerceIn(-WorldMapData.PLAYABLE_BOUND_X + 60f, WorldMapData.PLAYABLE_BOUND_X - 60f)
+                    val rz = (playerZ + sin(ang) * rad).coerceIn(-WorldMapData.PLAYABLE_BOUND_Z + 60f, WorldMapData.PLAYABLE_BOUND_Z - 60f)
+                    if (!CityWorldData.isNpcBlocked(rx, rz, 0.55f, chunkGrid, enterableBuildings, roadsideShops, parkedCars, cars, bulletBikes)) {
+                        npc.x = rx
+                        npc.z = rz
+                        npc.headingRad = nextAiRand() * 2f * PI.toFloat()
+                        npc.yawRad = npc.headingRad
+                        npc.fleeTimer = 0f
+                        npc.pauseTimer = 0f
+                        break
+                    }
+                }
             }
+            if (distToPlayerSq > 175f * 175f) continue
+
+            // Check vehicle threats: fast player vehicle or close AI car -> trigger panic & sprint away!
+            if (anyVehicleActive && abs(vehicleSpeed) > 3.0f && distToPlayerSq < 7.8f * 7.8f) {
+                npc.fleeTimer = 4.2f
+                npc.fleeFromX = playerX
+                npc.fleeFromZ = playerZ
+                npc.pauseTimer = 0f
+            } else {
+                for (car in cars) {
+                    if (car.currentSpeed < 2.2f) continue
+                    val cdx = npc.x - car.x
+                    val cdz = npc.z - car.z
+                    if (cdx * cdx + cdz * cdz < 5.2f * 5.2f) {
+                        npc.fleeTimer = 3.2f
+                        npc.fleeFromX = car.x
+                        npc.fleeFromZ = car.z
+                        npc.pauseTimer = 0f
+                        break
+                    }
+                }
+            }
+
+            // Friendly greeting when player approaches calmly on foot
             val dxP = playerX - npc.x
             val dzP = playerZ - npc.z
-            if (!inVehicle && dxP * dxP + dzP * dzP < 1.3f * 1.3f && playerY < 1.8f) {
+            if (!anyVehicleActive && npc.fleeTimer <= 0f && dxP * dxP + dzP * dzP < 2.1f * 2.1f && abs(playerY - WorldMapData.getTerrainHeight(npc.x, npc.z)) < 1.8f) {
                 npc.yawRad = lerpAngle(npc.yawRad, atan2(dxP, dzP), (dt * 6f).coerceAtMost(1f))
                 if (nearestInteract == null) nearestInteract = "Greet ${npc.name}"
                 if (interactNow && !interactConsumed) {
@@ -817,65 +1415,72 @@ class OpenGLCityRenderer(
                 }
                 continue
             }
-            npc.walkPhase += dt * 7.2f
-            if (npc.axisX) {
-                npc.x += npc.speed * npc.dir * dt
-                if (npc.x >= npc.maxBound) { npc.x = npc.maxBound; npc.dir = -1f; npc.pauseTimer = 1.4f }
-                else if (npc.x <= npc.minBound) { npc.x = npc.minBound; npc.dir = 1f; npc.pauseTimer = 1.4f }
-                npc.yawRad = if (npc.dir > 0f) (PI.toFloat() * 0.5f) else (-PI.toFloat() * 0.5f)
+
+            if (npc.fleeTimer <= 0f && npc.pauseTimer > 0f) {
+                npc.pauseTimer -= dt
+                continue
+            }
+
+            val isFleeing = npc.fleeTimer > 0f
+            if (isFleeing) {
+                npc.fleeTimer = (npc.fleeTimer - dt).coerceAtLeast(0f)
+                val awayAng = atan2(npc.x - npc.fleeFromX, npc.z - npc.fleeFromZ)
+                npc.headingRad = lerpAngle(npc.headingRad, awayAng, (dt * 9f).coerceAtMost(1f))
             } else {
-                npc.z += npc.speed * npc.dir * dt
-                if (npc.z >= npc.maxBound) { npc.z = npc.maxBound; npc.dir = -1f; npc.pauseTimer = 1.4f }
-                else if (npc.z <= npc.minBound) { npc.z = npc.minBound; npc.dir = 1f; npc.pauseTimer = 1.4f }
-                npc.yawRad = if (npc.dir > 0f) 0f else PI.toFloat()
-            }
-        }
-
-        // --- 4. Update traffic cars with Traffic Signal awareness & horn alert ---
-        val signalGreenForX = ((worldTime / 9.0f).toInt() % 2 == 0)
-        for (car in cars) {
-            val dxP = playerX - car.x
-            val dzP = playerZ - car.z
-            val forwardDist = if (car.axisX) dxP * car.dir else dzP * car.dir
-            val lateralDist = if (car.axisX) abs(dzP) else abs(dxP)
-            val playerBlocking = playerY < 1.6f && forwardDist in 0.5f..8.2f && lateralDist < 2.2f
-
-            if (playerBlocking && worldTime - lastHornTime > 2.6f) {
-                lastHornTime = worldTime
-                listener.onCarHorn()
-            }
-
-            var redLightStop = false
-            val axisGreen = if (car.axisX) signalGreenForX else !signalGreenForX
-            if (!axisGreen) {
-                val posAlong = if (car.axisX) car.x else car.z
-                for (rc in CityWorldData.roadCoords) {
-                    val distToStopLine = (rc - car.dir * 8.2f - posAlong) * car.dir
-                    if (distToStopLine in 0.2f..4.2f) {
-                        redLightStop = true
-                        break
+                npc.wanderTimer -= dt
+                if (npc.wanderTimer <= 0f) {
+                    npc.wanderTimer = 2.2f + nextAiRand() * 3.8f
+                    if (nextAiRand() < 0.14f) {
+                        npc.pauseTimer = 1.0f + nextAiRand() * 1.4f
+                        continue
                     }
+                    // Organic free-roaming turn
+                    npc.headingRad += (nextAiRand() - 0.5f) * 1.35f
                 }
             }
 
-            val desiredSpeed = if (playerBlocking || redLightStop) 0f else car.baseSpeed
-            car.currentSpeed += (desiredSpeed - car.currentSpeed) * (dt * 5.5f).coerceAtMost(1f)
-
-            if (car.axisX) {
-                car.x += car.currentSpeed * car.dir * dt
-                if (car.x > car.maxBound) car.x = car.minBound
-                if (car.x < car.minBound) car.x = car.maxBound
-            } else {
-                car.z += car.currentSpeed * car.dir * dt
-                if (car.z > car.maxBound) car.z = car.minBound
-                if (car.z < car.minBound) car.z = car.maxBound
+            val moveSpd = if (isFleeing) 5.2f else npc.speed
+            val stepDist = moveSpd * dt
+            var moved = false
+            val probeOffsets = floatArrayOf(0f, 0.55f, -0.55f, 1.15f, -1.15f, 2.0f, -2.0f, PI.toFloat())
+            for (angOff in probeOffsets) {
+                val tryAng = npc.headingRad + angOff
+                val candX = npc.x + sin(tryAng) * stepDist
+                val candZ = npc.z + cos(tryAng) * stepDist
+                val blocked = CityWorldData.isNpcBlocked(
+                    x = candX,
+                    z = candZ,
+                    npcRadius = 0.45f,
+                    chunkGrid = chunkGrid,
+                    enterables = enterableBuildings,
+                    activeShops = roadsideShops,
+                    activeParkedCars = parkedCars,
+                    movingCars = cars,
+                    activeBulletBikes = bulletBikes
+                )
+                if (!blocked) {
+                    val regTreeAdj = terrainChunkManager?.resolveRegionalTreeCollisions(candX, candZ, WorldMapData.getTerrainHeight(candX, candZ), 0.45f)
+                    npc.x = regTreeAdj?.first ?: candX
+                    npc.z = regTreeAdj?.second ?: candZ
+                    if (angOff != 0f) npc.headingRad = tryAng
+                    npc.yawRad = lerpAngle(npc.yawRad, npc.headingRad, (dt * 8.5f).coerceAtMost(1f))
+                    npc.walkPhase += dt * (if (isFleeing) 14.5f else 7.4f)
+                    moved = true
+                    break
+                }
             }
-            car.wheelAngleDeg = (car.wheelAngleDeg + car.currentSpeed * dt * 165f) % 360f
+            if (!moved) {
+                npc.headingRad += PI.toFloat() * 0.75f
+                npc.pauseTimer = if (isFleeing) 0f else 0.5f
+            }
         }
+
+        // --- 4. Intelligent Map-Wide AI Traffic Cars (Intersection Turns, Side-Steer Overtaking, Horn, Adaptive Speed!) ---
+        updateIntelligentAiTraffic(dt)
 
         // --- 5. Closer cinematic third-person camera distance (Free Fire / GTA style) ---
         val targetCamDist = when {
-            drivenCar != null -> 7.2f
+            drivenCar != null || drivenAiCar != null -> 7.2f
             riddenBike != null -> 5.4f
             currentBuilding != null -> 3.3f
             else -> 4.6f
@@ -911,15 +1516,33 @@ class OpenGLCityRenderer(
 
         for (c in skyClouds) {
             c.x += c.speedX * dt
-            if (c.x > 480f) c.x = -480f
+            if (c.x - playerX > 480f) c.x -= 960f
+            if (c.x - playerX < -480f) c.x += 960f
+            if (c.z - playerZ > 480f) c.z -= 960f
+            if (c.z - playerZ < -480f) c.z += 960f
         }
         for (bird in flyingBirds) {
             bird.angle = (bird.angle + bird.angularSpeed * dt) % (2f * PI.toFloat())
             bird.wingPhase += dt * 7.8f
+            // Solid 3D obstacle clearance so flying birds NEVER clip through skyscrapers, towers, trees, or mountains!
+            val bx = bird.centerX + cos(bird.angle) * bird.orbitRadius
+            val bz = bird.centerZ + sin(bird.angle) * bird.orbitRadius
+            val aheadAngle = bird.angle + 0.22f
+            val ax = bird.centerX + cos(aheadAngle) * bird.orbitRadius
+            val az = bird.centerZ + sin(aheadAngle) * bird.orbitRadius
+            val curCeil = CityWorldData.getMaxObstacleHeightAt(bx, bz, 3.8f, chunkGrid, enterableBuildings)
+            val aheadCeil = CityWorldData.getMaxObstacleHeightAt(ax, az, 4.2f, chunkGrid, enterableBuildings)
+            val requiredAlt = bird.baseAltitude.coerceAtLeast(maxOf(curCeil, aheadCeil) + 7.5f)
+            bird.altitude += (requiredAlt - bird.altitude) * (dt * 4.2f).coerceAtMost(1f)
+            if (bird.altitude < curCeil + 3.8f) {
+                bird.altitude = curCeil + 3.8f
+            }
         }
 
-        // Enter/Drive Parked Cars & Mount/Ride Royal Enfield Bullet 350 Motorcycles!
-        if (!inVehicle && playerY < 1.5f) {
+        // Enter/Drive Parked Cars & Mount/Ride Royal Enfield Bullet 350 Motorcycles (works at any mountain/island elevation!)
+        val playerGroundHere = WorldMapData.getTerrainHeight(playerX, playerZ)
+        val nearGroundForVehicle = abs(playerY - playerGroundHere) < 2.2f
+        if (!inVehicle && nearGroundForVehicle) {
             for (bike in bulletBikes) {
                 val dxB = playerX - bike.x
                 val dzB = playerZ - bike.z
@@ -928,6 +1551,9 @@ class OpenGLCityRenderer(
                     if (interactNow && !interactConsumed) {
                         riddenBike = bike
                         vehicleSpeed = 0f
+                        vehicleVelY = 0f
+                        vehicleGrounded = true
+                        playerY = WorldMapData.getTerrainHeight(bike.x, bike.z)
                         lastManualCameraDragTime = -10f
                         interactConsumed = true
                         listener.onInteractMessage("Riding ${bike.label} — 350cc Thumper Active!")
@@ -936,7 +1562,7 @@ class OpenGLCityRenderer(
                 }
             }
         }
-        if (!inVehicle && riddenBike == null && playerY < 1.5f) {
+        if (!inVehicle && riddenBike == null && drivenCar == null && drivenAiCar == null && nearGroundForVehicle) {
             for (pc in parkedCars) {
                 val dxC = playerX - pc.x
                 val dzC = playerZ - pc.z
@@ -945,10 +1571,37 @@ class OpenGLCityRenderer(
                     if (interactNow && !interactConsumed) {
                         drivenCar = pc
                         vehicleSpeed = 0f
+                        vehicleVelY = 0f
+                        vehicleGrounded = true
+                        playerY = WorldMapData.getTerrainHeight(pc.x, pc.z)
                         lastManualCameraDragTime = -10f
                         interactConsumed = true
                         listener.onCarEntered()
                         listener.onInteractMessage("Driving Car — Drag to look freely, HORN or EXIT anytime!")
+                        break
+                    }
+                }
+            }
+        }
+        // Drive ANY Moving AI Traffic Car on the map!
+        if (!inVehicle && riddenBike == null && drivenCar == null && drivenAiCar == null && nearGroundForVehicle) {
+            for (car in cars) {
+                val dxC = playerX - car.x
+                val dzC = playerZ - car.z
+                if (dxC * dxC + dzC * dzC < 4.5f * 4.5f) {
+                    if (nearestInteract == null) nearestInteract = "Drive Traffic Car"
+                    if (interactNow && !interactConsumed) {
+                        drivenAiCar = car
+                        car.isPlayerControlled = true
+                        car.parkedAfterExitTimer = 0f
+                        vehicleSpeed = 0f
+                        vehicleVelY = 0f
+                        vehicleGrounded = true
+                        playerY = WorldMapData.getTerrainHeight(car.x, car.z)
+                        lastManualCameraDragTime = -10f
+                        interactConsumed = true
+                        listener.onCarEntered()
+                        listener.onInteractMessage("Driving Traffic Car — Free-roam anywhere across Saini State!")
                         break
                     }
                 }
@@ -967,16 +1620,469 @@ class OpenGLCityRenderer(
 
         // Clean open central chauraha intersection (no fountain obstacle)
         val nowMs = System.currentTimeMillis()
-        if (nowMs - lastTelemetryReportMs >= 90L) {
+        if (nowMs - lastTelemetryReportMs >= 115L) {
             lastTelemetryReportMs = nowMs
             emitTelemetry(isMovingNow, wantsSprint, nearestInteract)
             emitAmbientAudioUpdate()
         }
     }
 
+    private fun getActiveTrafficCount(): Int = when (aiTrafficDensity) {
+        DensityLevel.OFF -> 0
+        DensityLevel.LOW -> (cars.size / 3).coerceAtLeast(4)
+        DensityLevel.MEDIUM -> (cars.size * 2 / 3).coerceAtLeast(8)
+        DensityLevel.HIGH -> cars.size
+    }
+
+    private data class VehicleSurfaceOrient(
+        val supportY: Float,
+        val pitchDeg: Float,
+        val rollDeg: Float
+    )
+
+    /**
+     * Multi-wheel 3D terrain height sampling for realistic vehicle suspension pitch & roll
+     * across hills, ramps, sea bridges, and coastal roads (zero nose-clipping!).
+     */
+    private fun sampleVehicleOrientation(
+        x: Float,
+        z: Float,
+        yawDeg: Float,
+        halfWheelbase: Float,
+        halfTrack: Float
+    ): VehicleSurfaceOrient {
+        val rad = yawDeg * PI.toFloat() / 180f
+        val fwdX = sin(rad)
+        val fwdZ = cos(rad)
+        val posX = cos(rad)
+        val posZ = -sin(rad)
+
+        val hC = WorldMapData.getTerrainHeight(x, z)
+        val hF = WorldMapData.getTerrainHeight(x + fwdX * halfWheelbase, z + fwdZ * halfWheelbase)
+        val hR = WorldMapData.getTerrainHeight(x - fwdX * halfWheelbase, z - fwdZ * halfWheelbase)
+        val hPosX = WorldMapData.getTerrainHeight(x + posX * halfTrack, z + posZ * halfTrack)
+        val hNegX = WorldMapData.getTerrainHeight(x - posX * halfTrack, z - posZ * halfTrack)
+
+        val avgY = (hF + hR + hPosX + hNegX) * 0.25f
+        val pitchDeg = (-atan2(hF - hR, 2f * halfWheelbase) * 180f / PI.toFloat()).coerceIn(-30f, 30f)
+        val rollDeg = (atan2(hPosX - hNegX, 2f * halfTrack) * 180f / PI.toFloat()).coerceIn(-25f, 25f)
+        return VehicleSurfaceOrient(supportY = maxOf(hC, avgY), pitchDeg = pitchDeg, rollDeg = rollDeg)
+    }
+
+    private fun updateIntelligentAiTraffic(dt: Float) {
+        val activeCarLimit = getActiveTrafficCount().coerceAtMost(cars.size)
+        if (activeCarLimit <= 0) return
+        val signalGreenForX = ((worldTime / 9.0f).toInt() % 2 == 0)
+        val splines = WorldMapData.roadSplines
+        val relocateCheck = (worldTime - lastTrafficRelocateTime) > 2.5f
+        if (relocateCheck) lastTrafficRelocateTime = worldTime
+        val playerOutsideMetro = abs(playerX) > 420f || playerZ < -410f || playerZ > 410f
+
+        for (i in 0 until activeCarLimit) {
+            val car = cars[i]
+            if (car.isPlayerControlled) continue
+            if (car.parkedAfterExitTimer > 0f) {
+                car.parkedAfterExitTimer = (car.parkedAfterExitTimer - dt).coerceAtLeast(0f)
+                car.currentSpeed = 0f
+                continue
+            }
+            if (car.turnCooldown > 0f) car.turnCooldown = (car.turnCooldown - dt).coerceAtLeast(0f)
+            if (car.hornCooldown > 0f) car.hornCooldown = (car.hornCooldown - dt).coerceAtLeast(0f)
+
+            val rad = car.yawDeg * PI.toFloat() / 180f
+            val fwdX = sin(rad)
+            val fwdZ = cos(rad)
+            // Right vector in world XZ when facing (fwdX, fwdZ): local +X is LEFT, local -X is RIGHT
+            val localPosX = cos(rad)
+            val localPosZ = -sin(rad)
+
+            // 1. GTA 6-Style Forward Vision Cone (center lane + left/right pass lane check, ZERO magnetic sliding!)
+            var minAheadDist = 99f
+            var centerBlocked = false
+            var leftLaneBlocked = false
+            var rightLaneBlocked = false
+            var hardStop = false
+            var shouldHonk = false
+
+            fun scanEntity(ox: Float, oz: Float, halfW: Float, halfL: Float, isPlayerEntity: Boolean) {
+                val dx = ox - car.x
+                val dz = oz - car.z
+                if (abs(dx) > 22f || abs(dz) > 22f) return
+                val fwd = dx * fwdX + dz * fwdZ
+                val lat = dx * localPosX + dz * localPosZ
+                if (fwd in 0.6f..(19.0f + halfL)) {
+                    if (abs(lat) < (1.42f + halfW)) {
+                        centerBlocked = true
+                        if (fwd < minAheadDist) minAheadDist = fwd
+                        if (isPlayerEntity && fwd < 13f) shouldHonk = true
+                        if (!isPlayerEntity && fwd < 9.5f) shouldHonk = true
+                        if (fwd < (4.2f + halfL) && abs(lat) < (1.18f + halfW * 0.65f)) {
+                            hardStop = true
+                        }
+                    }
+                    // Check if +3.0m or -3.0m side-pass lanes are occupied
+                    if (abs(lat - 3.0f) < (1.40f + halfW)) leftLaneBlocked = true
+                    if (abs(lat + 3.0f) < (1.40f + halfW)) rightLaneBlocked = true
+                }
+            }
+
+            val playerGroundDiff = abs(playerY - WorldMapData.getTerrainHeight(car.x, car.z))
+            if (playerGroundDiff < 2.4f) {
+                val pW = if (drivenCar != null || drivenAiCar != null) 1.30f else 0.72f
+                val pL = if (drivenCar != null || drivenAiCar != null) 2.40f else 0.72f
+                scanEntity(playerX, playerZ, pW, pL, isPlayerEntity = true)
+            }
+            for (j in 0 until activeCarLimit) {
+                if (i == j) continue
+                val other = cars[j]
+                scanEntity(other.x, other.z, 1.25f, 2.40f, isPlayerEntity = false)
+            }
+            for (pc in parkedCars) {
+                scanEntity(pc.x, pc.z, 1.25f, 2.40f, isPlayerEntity = false)
+            }
+            for (bike in bulletBikes) {
+                scanEntity(bike.x, bike.z, 0.78f, 1.15f, isPlayerEntity = false)
+            }
+
+            val distPlayerSq = (playerX - car.x) * (playerX - car.x) + (playerZ - car.z) * (playerZ - car.z)
+            val playerBoardingNear = drivenCar == null && drivenAiCar == null && riddenBike == null && distPlayerSq < 4.8f * 4.8f
+
+            if (shouldHonk && car.hornCooldown <= 0f && distPlayerSq < 44f * 44f && worldTime - lastHornTime > 1.9f) {
+                lastHornTime = worldTime
+                car.hornCooldown = 3.4f
+                listener.onCarHorn()
+            }
+
+            // Also verify solid buildings/dhabas/hotels/trees along side-pass lanes so AI NEVER swerves into a wall!
+            val probeDist = 6.5f
+            if (!leftLaneBlocked) {
+                val lx = car.x + fwdX * probeDist + localPosX * 3.0f
+                val lz = car.z + fwdZ * probeDist + localPosZ * 3.0f
+                if (CityWorldData.isVehicleSolidBlocked(lx, lz, 1.35f, chunkGrid, enterableBuildings, roadsideShops)) {
+                    leftLaneBlocked = true
+                }
+            }
+            if (!rightLaneBlocked) {
+                val rx = car.x + fwdX * probeDist - localPosX * 3.0f
+                val rz = car.z + fwdZ * probeDist - localPosZ * 3.0f
+                if (CityWorldData.isVehicleSolidBlocked(rx, rz, 1.35f, chunkGrid, enterableBuildings, roadsideShops)) {
+                    rightLaneBlocked = true
+                }
+            }
+
+            // Human-like lateral steering: ONLY steer sideways proportional to forward speed (ZERO magnetic sliding when stopped!)
+            val desiredAvoid = when {
+                !centerBlocked -> 0f
+                !leftLaneBlocked && !car.isTurning -> 2.85f
+                !rightLaneBlocked && !car.isTurning -> -2.85f
+                else -> {
+                    // Both side lanes blocked -> brake cleanly & wait like a real driver!
+                    if (minAheadDist < 9.0f) hardStop = true
+                    car.avoidOffset * 0.5f
+                }
+            }
+            val moveRatio = (car.currentSpeed / 6.0f).coerceIn(0f, 1f)
+            if (moveRatio > 0.08f) {
+                val avoidRate = (if (desiredAvoid != 0f) 2.6f else 1.8f) * moveRatio
+                car.avoidOffset += (desiredAvoid - car.avoidOffset) * (dt * avoidRate).coerceAtMost(1f)
+            }
+
+            val prevX = car.x
+            val prevZ = car.z
+
+            if (car.splineIndex >= 0 && car.splineIndex < splines.size) {
+                // --- 50 KM x 65 KM MULTI-ISLAND & MAINLAND HIGHWAY SPLINE AI ---
+                if (relocateCheck && playerOutsideMetro && distPlayerSq > 540f * 540f) {
+                    var bestSp = -1
+                    var bestDistAlong = 0f
+                    var bestDSq = Float.MAX_VALUE
+                    for (si in splines.indices) {
+                        val sp = splines[si]
+                        if (!sp.roadClass.isPaved) continue
+                        var acc = 0f
+                        for (pi in 0 until sp.points.size - 1) {
+                            val (ax, az) = sp.points[pi]
+                            val (bx, bz) = sp.points[pi + 1]
+                            val segL = sqrt((bx - ax) * (bx - ax) + (bz - az) * (bz - az))
+                            val mx = (ax + bx) * 0.5f
+                            val mz = (az + bz) * 0.5f
+                            val d2 = (mx - playerX) * (mx - playerX) + (mz - playerZ) * (mz - playerZ)
+                            if (d2 in (95f * 95f)..(340f * 340f) && d2 < bestDSq) {
+                                bestDSq = d2
+                                bestSp = si
+                                bestDistAlong = acc + segL * 0.5f
+                            }
+                            acc += segL
+                        }
+                    }
+                    if (bestSp >= 0) {
+                        car.splineIndex = bestSp
+                        car.splineDist = bestDistAlong
+                        car.avoidOffset = 0f
+                        car.isTurning = false
+                    }
+                }
+
+                val sp = splines[car.splineIndex]
+                val totalLen = computeSplineLength(sp)
+                val targetSpd = when {
+                    hardStop || playerBoardingNear -> 0f
+                    centerBlocked && minAheadDist < 15f -> car.baseSpeed * 0.45f
+                    else -> car.baseSpeed
+                }
+                car.currentSpeed += (targetSpd - car.currentSpeed) * (dt * 4.5f).coerceAtMost(1f)
+                car.splineDist += car.currentSpeed * car.splineDir * dt
+                if (sp.closedLoop) {
+                    if (car.splineDist >= totalLen) car.splineDist -= totalLen
+                    if (car.splineDist < 0f) car.splineDist += totalLen
+                } else {
+                    if (car.splineDist >= totalLen - 12f) {
+                        car.splineDist = totalLen - 12f
+                        car.splineDir = -1f
+                    } else if (car.splineDist <= 12f) {
+                        car.splineDist = 12f
+                        car.splineDir = 1f
+                    }
+                }
+                val sample = sampleRoadSpline(sp, car.splineDist, car.splineDir)
+                val spYawRad = sample.third
+                val laneRightX = cos(spYawRad)
+                val laneRightZ = -sin(spYawRad)
+                val totalLat = 2.65f + car.avoidOffset
+                val candX = sample.first + laneRightX * totalLat
+                val candZ = sample.second + laneRightZ * totalLat
+                if (!CityWorldData.isVehicleSolidBlocked(candX, candZ, 1.25f, chunkGrid, enterableBuildings, roadsideShops)) {
+                    car.x = candX
+                    car.z = candZ
+                } else {
+                    // Stay cleanly on paved centerline if roadside structure is near shoulder
+                    car.avoidOffset *= 0.4f
+                    car.x = sample.first + laneRightX * 2.1f
+                    car.z = sample.second + laneRightZ * 2.1f
+                }
+                val targetYaw = spYawRad * 180f / PI.toFloat()
+                car.yawDeg = lerpAngleDeg(car.yawDeg, targetYaw, (dt * 5.8f).coerceAtMost(1f))
+                car.wheelAngleDeg = (car.wheelAngleDeg + car.currentSpeed * dt * 165f) % 360f
+            } else {
+                // --- SAINI METRO CITY GRID AI (GTA 6 Smooth Curved Bezier Intersection Turns — NO 90° Snaps, NO Loops!) ---
+                var redLightStop = false
+                if (!car.isTurning) {
+                    val axisGreen = if (car.axisX) signalGreenForX else !signalGreenForX
+                    if (!axisGreen) {
+                        val posAlong = if (car.axisX) car.x else car.z
+                        for (rc in CityWorldData.roadCoords) {
+                            val distToStopLine = (rc - car.dir * 8.2f - posAlong) * car.dir
+                            if (distToStopLine in 0.2f..4.2f) {
+                                redLightStop = true
+                                break
+                            }
+                        }
+                    }
+                }
+
+                val targetSpd = when {
+                    hardStop || redLightStop || playerBoardingNear -> 0f
+                    car.isTurning -> (car.baseSpeed * 0.62f).coerceAtLeast(3.8f)
+                    centerBlocked && minAheadDist < 15.5f -> car.baseSpeed * 0.45f
+                    else -> car.baseSpeed
+                }
+                car.currentSpeed += (targetSpd - car.currentSpeed) * (dt * 4.8f).coerceAtMost(1f)
+
+                if (car.isTurning) {
+                    // Advance smoothly along quadratic Bezier arc around intersection corner!
+                    val arcLen = 11.2f
+                    car.turnT += (car.currentSpeed * dt) / arcLen
+                    val t = car.turnT.coerceIn(0f, 1f)
+                    val u = 1f - t
+                    val bx = u * u * car.turnStartX + 2f * u * t * car.turnCtrlX + t * t * car.turnEndX
+                    val bz = u * u * car.turnStartZ + 2f * u * t * car.turnCtrlZ + t * t * car.turnEndZ
+                    // Derivative tangent of Bezier curve for natural curved steering angle
+                    val tanX = 2f * u * (car.turnCtrlX - car.turnStartX) + 2f * t * (car.turnEndX - car.turnCtrlX)
+                    val tanZ = 2f * u * (car.turnCtrlZ - car.turnStartZ) + 2f * t * (car.turnEndZ - car.turnCtrlZ)
+                    if (!CityWorldData.isVehicleSolidBlocked(bx, bz, 1.25f, chunkGrid, enterableBuildings, roadsideShops)) {
+                        car.x = bx
+                        car.z = bz
+                        if (tanX * tanX + tanZ * tanZ > 0.01f) {
+                            val tangentYaw = atan2(tanX, tanZ) * 180f / PI.toFloat()
+                            car.yawDeg = lerpAngleDeg(car.yawDeg, tangentYaw, (dt * 11f).coerceAtMost(1f))
+                        }
+                    } else {
+                        car.currentSpeed *= 0.2f
+                    }
+                    if (car.turnT >= 1f) {
+                        car.isTurning = false
+                        car.turnT = 0f
+                        car.turnCooldown = 5.5f
+                    }
+                } else {
+                    // Check if approaching a valid city intersection to initiate a smooth curved Bezier turn (NO 90° snap!)
+                    if (car.turnCooldown <= 0f && !redLightStop && minAheadDist > 9f && car.currentSpeed > 2.0f) {
+                        val posAlong = if (car.axisX) car.x else car.z
+                        for (rc in CityWorldData.roadCoords) {
+                            val distBeforeCenter = (rc - posAlong) * car.dir
+                            // Trigger turn entry 5.5m..7.8m BEFORE intersection center so the Bezier arc sweeps cleanly around corner!
+                            if (distBeforeCenter in 5.2f..7.8f && rc in -180f..180f) {
+                                val interKey = (rc.toInt() shl 16) xor car.roadLaneCoord.toInt()
+                                if (interKey != car.lastInterKey) {
+                                    car.lastInterKey = interKey
+                                    val turnRoll = nextAiRand()
+                                    if (turnRoll < 0.34f) {
+                                        val newAxisX = !car.axisX
+                                        val newDir = if (nextAiRand() < 0.5f) 1f else -1f
+                                        val newLaneCoord = rc + (if (newAxisX) (newDir * 2.7f) else (-newDir * 2.7f))
+                                        val startX = car.x
+                                        val startZ = car.z
+                                        val ctrlX = if (car.axisX) newLaneCoord else car.x
+                                        val ctrlZ = if (car.axisX) car.z else newLaneCoord
+                                        val endX = if (newAxisX) (rc + newDir * 6.5f) else newLaneCoord
+                                        val endZ = if (newAxisX) newLaneCoord else (rc + newDir * 6.5f)
+
+                                        car.axisX = newAxisX
+                                        car.dir = newDir
+                                        car.roadLaneCoord = newLaneCoord
+                                        car.avoidOffset = 0f
+                                        car.isTurning = true
+                                        car.turnT = 0f
+                                        car.turnStartX = startX
+                                        car.turnStartZ = startZ
+                                        car.turnCtrlX = ctrlX
+                                        car.turnCtrlZ = ctrlZ
+                                        car.turnEndX = endX
+                                        car.turnEndZ = endZ
+                                    } else {
+                                        car.turnCooldown = 2.8f
+                                    }
+                                }
+                                break
+                            }
+                        }
+                    }
+
+                    val baseYaw = if (car.axisX) (if (car.dir > 0f) 90f else -90f) else (if (car.dir > 0f) 0f else 180f)
+                    val swerveYaw = if (moveRatio > 0.1f) ((desiredAvoid - car.avoidOffset) * 4.5f).coerceIn(-18f, 18f) else 0f
+                    car.targetYawDeg = baseYaw + swerveYaw
+                    car.yawDeg = lerpAngleDeg(car.yawDeg, car.targetYawDeg, (dt * 6.5f).coerceAtMost(1f))
+
+                    var nextX = car.x
+                    var nextZ = car.z
+                    if (car.axisX) {
+                        nextX += car.currentSpeed * car.dir * dt
+                        if (moveRatio > 0.08f) {
+                            val targetZ = car.roadLaneCoord + car.avoidOffset * (if (car.dir > 0f) -1f else 1f)
+                            nextZ += (targetZ - nextZ) * (dt * 3.8f * moveRatio).coerceAtMost(1f)
+                        }
+                        if (nextX > car.maxBound) { nextX = car.minBound; car.lastInterKey = Int.MIN_VALUE }
+                        if (nextX < car.minBound) { nextX = car.maxBound; car.lastInterKey = Int.MIN_VALUE }
+                    } else {
+                        nextZ += car.currentSpeed * car.dir * dt
+                        if (moveRatio > 0.08f) {
+                            val targetX = car.roadLaneCoord + car.avoidOffset * (if (car.dir > 0f) 1f else -1f)
+                            nextX += (targetX - nextX) * (dt * 3.8f * moveRatio).coerceAtMost(1f)
+                        }
+                        if (nextZ > car.maxBound) { nextZ = car.minBound; car.lastInterKey = Int.MIN_VALUE }
+                        if (nextZ < car.minBound) { nextZ = car.maxBound; car.lastInterKey = Int.MIN_VALUE }
+                    }
+                    if (!CityWorldData.isVehicleSolidBlocked(nextX, nextZ, 1.25f, chunkGrid, enterableBuildings, roadsideShops)) {
+                        car.x = nextX
+                        car.z = nextZ
+                    } else {
+                        car.currentSpeed *= 0.25f
+                        car.avoidOffset *= 0.4f
+                    }
+                }
+                car.wheelAngleDeg = (car.wheelAngleDeg + car.currentSpeed * dt * 165f) % 360f
+            }
+
+            // Smooth 3D surface slope alignment for nearby moving AI cars (zero nose-clipping on hills/bridges!)
+            if (distPlayerSq < 115f * 115f) {
+                val aiOrient = sampleVehicleOrientation(car.x, car.z, car.yawDeg, 1.38f, 0.88f)
+                car.pitchDeg += (aiOrient.pitchDeg - car.pitchDeg) * (dt * 8.5f).coerceAtMost(1f)
+                car.rollDeg += (aiOrient.rollDeg - car.rollDeg) * (dt * 8.5f).coerceAtMost(1f)
+            }
+            // Safety clamp if car moved outside world bounds
+            if (abs(car.x) > WorldMapData.PLAYABLE_BOUND_X - 40f || abs(car.z) > WorldMapData.PLAYABLE_BOUND_Z - 40f) {
+                car.x = prevX
+                car.z = prevZ
+                car.splineDir = -car.splineDir
+            }
+        }
+
+        // Gentle Car-to-Car separation ONLY when both are overlapping tightly (without causing magnetic sideways slides!)
+        for (i in 0 until activeCarLimit) {
+            val a = cars[i]
+            if (a.isPlayerControlled) continue
+            for (j in i + 1 until activeCarLimit) {
+                val b = cars[j]
+                if (b.isPlayerControlled) continue
+                val dx = a.x - b.x
+                val dz = a.z - b.z
+                val dSq = dx * dx + dz * dz
+                if (dSq < 3.1f * 3.1f && dSq > 0.001f) {
+                    val d = sqrt(dSq)
+                    val push = (3.1f - d) * 0.45f
+                    val nx = dx / d; val nz = dz / d
+                    val ax = a.x + nx * push; val az = a.z + nz * push
+                    val bx = b.x - nx * push; val bz = b.z - nz * push
+                    if (!CityWorldData.isVehicleSolidBlocked(ax, az, 1.2f, chunkGrid, enterableBuildings, roadsideShops)) {
+                        a.x = ax; a.z = az
+                    }
+                    if (!CityWorldData.isVehicleSolidBlocked(bx, bz, 1.2f, chunkGrid, enterableBuildings, roadsideShops)) {
+                        b.x = bx; b.z = bz
+                    }
+                }
+            }
+        }
+    }
+
+    private fun computeSplineLength(sp: RoadSpline): Float {
+        var total = 0f
+        val pts = sp.points
+        for (i in 0 until pts.size - 1) {
+            val dx = pts[i + 1].first - pts[i].first
+            val dz = pts[i + 1].second - pts[i].second
+            total += sqrt(dx * dx + dz * dz)
+        }
+        if (sp.closedLoop && pts.size >= 2) {
+            val dx = pts[0].first - pts.last().first
+            val dz = pts[0].second - pts.last().second
+            total += sqrt(dx * dx + dz * dz)
+        }
+        return total.coerceAtLeast(1f)
+    }
+
+    private fun sampleRoadSpline(sp: RoadSpline, distIn: Float, dir: Float): Triple<Float, Float, Float> {
+        val pts = sp.points
+        if (pts.size < 2) return Triple(0f, 0f, 0f)
+        val segCount = if (sp.closedLoop) pts.size else pts.size - 1
+        var rem = distIn.coerceAtLeast(0f)
+        for (i in 0 until segCount) {
+            val a = pts[i]
+            val b = pts[(i + 1) % pts.size]
+            val dx = b.first - a.first
+            val dz = b.second - a.second
+            val len = sqrt(dx * dx + dz * dz).coerceAtLeast(0.001f)
+            if (rem <= len || i == segCount - 1) {
+                val t = (rem / len).coerceIn(0f, 1f)
+                val x = a.first + dx * t
+                val z = a.second + dz * t
+                val h = atan2(dx * dir, dz * dir)
+                return Triple(x, z, h)
+            }
+            rem -= len
+        }
+        return Triple(pts[0].first, pts[0].second, 0f)
+    }
+
+    private fun lerpAngleDeg(a: Float, b: Float, t: Float): Float {
+        var diff = (b - a) % 360f
+        if (diff < -180f) diff += 360f
+        if (diff > 180f) diff -= 360f
+        return a + diff * t
+    }
+
     private fun emitAmbientAudioUpdate() {
         val mode = when {
-            drivenCar != null -> ActiveVehicleMode.CAR
+            drivenCar != null || drivenAiCar != null -> ActiveVehicleMode.CAR
             riddenBike != null -> ActiveVehicleMode.BULLET_BIKE
             else -> ActiveVehicleMode.ON_FOOT
         }
@@ -992,10 +2098,10 @@ class OpenGLCityRenderer(
             if (d < heliDist) heliDist = d
         }
 
-        // Distance to ocean/beach/port shoreline (z >= WATERFRONT_Z)
-        val oceanDist = (CityWorldData.WATERFRONT_Z - playerZ).coerceAtLeast(0f)
+        // Distance to 360-degree curved coastline / ocean / beaches / islands
+        val oceanDist = WorldMapData.getOceanDistance(playerX, playerZ)
 
-        // Proximity to trees/park for daytime birds chirping
+        // Proximity to trees/park/jungle for daytime birds chirping
         var nearbyTrees = 0
         for (t in visTrees) {
             val dx = playerX - t.x
@@ -1005,7 +2111,14 @@ class OpenGLCityRenderer(
                 if (nearbyTrees >= 6) break
             }
         }
-        val nearTreesFactor = (nearbyTrees / 6f).coerceIn(0f, 1f)
+        val biomeHere = WorldMapData.getBiomeAt(playerX, playerZ)
+        val biomeBirdBoost = when (biomeHere) {
+            WorldBiome.JUNGLE_RIVER -> 0.85f
+            WorldBiome.VILLAGE_PLAINS, WorldBiome.SNOW_PEAKS -> 0.55f
+            WorldBiome.KONKAN_COAST, WorldBiome.SAINI_KEYS -> 0.35f
+            else -> 0f
+        }
+        val nearTreesFactor = maxOf((nearbyTrees / 6f).coerceIn(0f, 1f), biomeBirdBoost)
 
         listener.onAmbientAudioUpdate(
             vehicleMode = mode,
@@ -1026,10 +2139,13 @@ class OpenGLCityRenderer(
         nearbyInteract: String? = null
     ) {
         val insideShop = roadsideShops.firstOrNull { it.isInsideShop(playerX, playerZ) }
+        val inMetroCore = abs(playerX) <= 450f && playerZ in -420f..410f
         val locLabel = currentBuilding?.let { b ->
             val floorText = if (currentFloorNumber >= 2) "2nd Floor" else "Ground Floor"
             "${b.name} • $floorText"
-        } ?: insideShop?.let { "${it.name} • Interior" } ?: when {
+        } ?: insideShop?.let { "${it.name} • Interior" } ?: if (!inMetroCore) {
+            WorldMapData.getRegionLabel(playerX, playerZ)
+        } else when {
             playerZ > CityWorldData.WATERFRONT_Z -> "Saini Waterfront Pier"
             playerZ in 350f..CityWorldData.WATERFRONT_Z && (playerX > 55f || playerX < -55f) -> "Saini Harbor & Container Port"
             playerX > 290f && playerZ in -370f..-130f -> "Saini International Airport"
@@ -1042,7 +2158,7 @@ class OpenGLCityRenderer(
         }
 
         val mode = when {
-            drivenCar != null -> ActiveVehicleMode.CAR
+            drivenCar != null || drivenAiCar != null -> ActiveVehicleMode.CAR
             riddenBike != null -> ActiveVehicleMode.BULLET_BIKE
             else -> ActiveVehicleMode.ON_FOOT
         }
@@ -1052,6 +2168,12 @@ class OpenGLCityRenderer(
             else -> "Day"
         }
 
+        if (cachedCollectedOrbsSnapshot.size != collectedOrbs.size) {
+            cachedCollectedOrbsSnapshot = collectedOrbs.toSet()
+        }
+        if (cachedDiscoveredZonesSnapshot.size != discoveredZones.size) {
+            cachedDiscoveredZonesSnapshot = discoveredZones.toSet()
+        }
         listener.onTelemetryUpdate(
             GameTelemetry(
                 playerX = playerX,
@@ -1063,8 +2185,8 @@ class OpenGLCityRenderer(
                 isSprinting = isSprinting,
                 stamina = stamina,
                 health = health,
-                collectedOrbIds = collectedOrbs.toSet(),
-                discoveredZoneIds = discoveredZones.toSet(),
+                collectedOrbIds = cachedCollectedOrbsSnapshot,
+                discoveredZoneIds = cachedDiscoveredZonesSnapshot,
                 nearbyInteractTarget = nearbyInteract,
                 distanceThisSession = totalDistance,
                 sessionScore = sessionScore,
@@ -1080,7 +2202,11 @@ class OpenGLCityRenderer(
                 vehicleMode = mode,
                 vehicleSpeedKmh = (abs(vehicleSpeed) * 3.6f).toInt(),
                 nearbyGateName = nearbyGate?.name,
-                nearbyGateProgress = nearbyGate?.openProgress ?: 0f
+                nearbyGateProgress = nearbyGate?.openProgress ?: 0f,
+                isInWater = isInWaterNow,
+                waterWarning = currentWaterWarning,
+                parkedCarX = lastPlayerVehX,
+                parkedCarZ = lastPlayerVehZ
             )
         )
     }
@@ -1092,6 +2218,8 @@ class OpenGLCityRenderer(
      */
     private fun gatherStreamedChunksAndObjects() {
         activeChunks.clear()
+        seenBuildings.clear(); seenEnterables.clear(); seenRoadsideShops.clear()
+        seenPortContainers.clear(); seenArmyBunkers.clear(); seenBarbedFences.clear(); seenArmyVehicles.clear()
         visBuildings.clear(); visEnterables.clear(); visRoadsideShops.clear(); visStaticObstacles.clear(); visPortContainers.clear()
         visTrees.clear(); visStreetLights.clear(); visTrafficSignals.clear(); visBenches.clear()
         visKiosks.clear(); visParkedCars.clear(); visMovingCars.clear(); visNpcs.clear()
@@ -1101,6 +2229,9 @@ class OpenGLCityRenderer(
         visibleObjectsThisFrame = 0
         culledObjectsThisFrame = 0
 
+        // Skip downtown 20m chunk grid scan entirely when cruising outside Saini Metro (saves CPU!)
+        val nearMetroGrid = abs(playerX) < 560f && playerZ in -560f..560f
+        if (nearMetroGrid) {
         val scanRad = streamingRadiusMeters + 24f
         val minCx = (((playerX - scanRad) - CityWorldData.GRID_MIN) / CityWorldData.CHUNK_SIZE).toInt().coerceIn(0, CityWorldData.GRID_DIM - 1)
         val maxCx = (((playerX + scanRad) - CityWorldData.GRID_MIN) / CityWorldData.CHUNK_SIZE).toInt().coerceIn(0, CityWorldData.GRID_DIM - 1)
@@ -1132,19 +2263,19 @@ class OpenGLCityRenderer(
                     if (isObjectInZoneAndCone(al.x, al.z, al.length * 0.58f)) visColonyAlleys.add(al)
                 }
                 for (b in chunk.buildings) {
-                    if (isObjectInZoneAndCone(b.x, b.z, maxOf(b.width, b.depth) * 0.78f)) visBuildings.add(b)
+                    if (isObjectInZoneAndCone(b.x, b.z, maxOf(b.width, b.depth) * 0.78f) && seenBuildings.add(b)) visBuildings.add(b)
                 }
                 for (eb in chunk.enterables) {
-                    if (isObjectInZoneAndCone(eb.centerX, eb.centerZ, 12.0f)) visEnterables.add(eb)
+                    if (isObjectInZoneAndCone(eb.centerX, eb.centerZ, 12.0f) && seenEnterables.add(eb)) visEnterables.add(eb)
                 }
                 for (shop in chunk.roadsideShops) {
-                    if (isObjectInZoneAndCone(shop.x, shop.z, 5.2f)) visRoadsideShops.add(shop)
+                    if (isObjectInZoneAndCone(shop.x, shop.z, 5.2f) && seenRoadsideShops.add(shop)) visRoadsideShops.add(shop)
                 }
                 for (obs in chunk.staticObstacles) {
                     if (isObjectInZoneAndCone(obs.x, obs.z, obs.size + 1.4f)) visStaticObstacles.add(obs)
                 }
                 for (c in chunk.portContainers) {
-                    if (isObjectInZoneAndCone(c.x, c.z, maxOf(c.length, c.width) * 0.65f)) visPortContainers.add(c)
+                    if (isObjectInZoneAndCone(c.x, c.z, maxOf(c.length, c.width) * 0.65f) && seenPortContainers.add(c)) visPortContainers.add(c)
                 }
                 for (t in chunk.trees) {
                     if (isObjectInZoneAndCone(t.x, t.z, 4.2f * t.scale)) visTrees.add(t)
@@ -1165,31 +2296,44 @@ class OpenGLCityRenderer(
                     if (isObjectInZoneAndCone(g.x, g.z, 1.4f)) visGrassTufts.add(g)
                 }
                 for (bk in chunk.armyBunkers) {
-                    if (isObjectInZoneAndCone(bk.x, bk.z, maxOf(bk.width, bk.depth) * 0.7f)) visArmyBunkers.add(bk)
+                    if (isObjectInZoneAndCone(bk.x, bk.z, maxOf(bk.width, bk.depth) * 0.7f) && seenArmyBunkers.add(bk)) visArmyBunkers.add(bk)
                 }
                 for (fn in chunk.barbedFences) {
-                    if (isObjectInZoneAndCone(fn.x, fn.z, fn.length * 0.55f)) visBarbedFences.add(fn)
+                    if (isObjectInZoneAndCone(fn.x, fn.z, fn.length * 0.55f) && seenBarbedFences.add(fn)) visBarbedFences.add(fn)
                 }
                 for (hp in chunk.helipads) {
                     if (isObjectInZoneAndCone(hp.x, hp.z, hp.size * 0.75f)) visHelipads.add(hp)
                 }
                 for (av in chunk.armyVehicles) {
-                    if (isObjectInZoneAndCone(av.x, av.z, 4.0f)) visArmyVehicles.add(av)
+                    if (isObjectInZoneAndCone(av.x, av.z, 4.0f) && seenArmyVehicles.add(av)) visArmyVehicles.add(av)
                 }
             }
         }
+        } // end if (nearMetroGrid)
 
-        // Dynamic drivable cars, rideable Bullet bikes, moving traffic, NPCs & soaring birds
+        // Dynamic drivable cars, rideable Bullet bikes, moving traffic (scaled by Traffic Density), NPCs & soaring birds
         for (pc in parkedCars) {
             if (pc === drivenCar || isObjectInZoneAndCone(pc.x, pc.z, 3.4f)) visParkedCars.add(pc)
         }
         for (bike in bulletBikes) {
             if (bike === riddenBike || isObjectInZoneAndCone(bike.x, bike.z, 2.2f)) visBulletBikes.add(bike)
         }
-        for (car in cars) {
-            if (isObjectInZoneAndCone(car.x, car.z, 3.4f)) visMovingCars.add(car)
+        val activeTrafficLimit = getActiveTrafficCount().coerceAtMost(cars.size)
+        for (ci in 0 until activeTrafficLimit) {
+            val car = cars[ci]
+            if (car === drivenAiCar || isObjectInZoneAndCone(car.x, car.z, 3.6f)) visMovingCars.add(car)
         }
-        for (npc in npcs) {
+        if (drivenAiCar != null && !visMovingCars.contains(drivenAiCar)) {
+            visMovingCars.add(drivenAiCar!!)
+        }
+        val activeNpcLimit = when (npcDensity) {
+            DensityLevel.OFF -> 0
+            DensityLevel.LOW -> (npcs.size / 3).coerceAtLeast(4)
+            DensityLevel.MEDIUM -> (npcs.size * 2 / 3).coerceAtLeast(8)
+            DensityLevel.HIGH -> npcs.size
+        }.coerceAtMost(npcs.size)
+        for (ni in 0 until activeNpcLimit) {
+            val npc = npcs[ni]
             if (isObjectInZoneAndCone(npc.x, npc.z, 1.5f)) visNpcs.add(npc)
         }
         for (bird in flyingBirds) {
@@ -1204,13 +2348,20 @@ class OpenGLCityRenderer(
         val dzP = objZ - playerZ
         val distPlayerSq = dxP * dxP + dzP * dzP
         val maxR = streamingRadiusMeters + objRadius
-        return if (distPlayerSq <= maxR * maxR) {
-            visibleObjectsThisFrame++
-            true
-        } else {
+        if (distPlayerSq > maxR * maxR) {
             culledObjectsThisFrame++
-            false
+            return false
         }
+        // Real camera frustum half-space culling: skip distant objects strictly behind the camera (~50% GPU draw savings!)
+        val dxC = objX - camPosX
+        val dzC = objZ - camPosZ
+        val forwardProj = dxC * camForwardX + dzC * camForwardZ
+        if (forwardProj < -(objRadius + 9.5f)) {
+            culledObjectsThisFrame++
+            return false
+        }
+        visibleObjectsThisFrame++
+        return true
     }
 
     private fun renderScene() {
@@ -1236,8 +2387,9 @@ class OpenGLCityRenderer(
         val sinPitch = sin(cameraPitch)
         val cosPitch = cos(cameraPitch)
         val lookAtY = playerY + (if (drivenCar != null) 1.55f else 1.48f)
+        val playerGroundY = WorldMapData.getTerrainHeight(playerX, playerZ)
         if (currentBuilding == null && sinPitch < -0.05f) {
-            val maxDistAboveGround = (lookAtY - 0.55f) / (-sinPitch)
+            val maxDistAboveGround = (lookAtY - (playerGroundY + 0.55f)) / (-sinPitch)
             effDist = minOf(effDist, maxDistAboveGround.coerceAtLeast(1.8f))
         }
         val rayDirX = sin(cameraYaw) * cosPitch
@@ -1247,14 +2399,15 @@ class OpenGLCityRenderer(
         }
 
         camPosX = playerX + rayDirX * effDist
+        camPosZ = playerZ + rayDirZ * effDist
         val desiredCamY = lookAtY + 0.15f + sinPitch * effDist
         camPosY = if (currentBuilding != null) {
             val floorBase = if (currentFloorNumber >= 2) currentBuilding!!.floorHeight else 0f
             desiredCamY.coerceIn(floorBase + 0.9f, floorBase + currentBuilding!!.floorHeight - 0.45f)
         } else {
-            desiredCamY.coerceAtLeast(0.55f)
+            val camGroundY = WorldMapData.getTerrainHeight(camPosX, camPosZ)
+            desiredCamY.coerceAtLeast(camGroundY + 0.60f)
         }
-        camPosZ = playerZ + rayDirZ * effDist
 
         Matrix.setLookAtM(
             dc.viewMatrix, 0,
@@ -1299,37 +2452,51 @@ class OpenGLCityRenderer(
             )
         }
 
-        // 1. Ground Terrain, Animated Normal-Mapped Ocean Water, Paver Footpaths & Detailed Asphalt Roads (10x 1km x 1km Metropolis)
-        dc.bindVbo(assets.quadMesh)
-        dc.drawQuad(0f, 0f, -50f, 1080f, 940f, assets.texGrass, 140f, 120f, 0.94f, 0.98f, 0.92f, 0f, 0.04f, 8f, 0f)
-        // Sandy coastal edge
-        dc.drawQuad(0f, 0.01f, CityWorldData.WATERFRONT_Z + 1.5f, 1080f, 4.5f, assets.texConcrete, 96f, 1f, 0.92f, 0.84f, 0.68f, 0f, 0.08f, 12f, 0f)
-        // Animated Ocean Water Mesh (tex_water_ocean diffuse + tex_water_normal bump map + scrolling UV waves!)
-        val waveU = (worldTime * 0.030f) % 1f
-        val waveV = (worldTime * 0.018f) % 1f
-        dc.drawQuad(
-            0f, -0.05f, CityWorldData.WATERFRONT_Z + 90f, 1120f, 180f,
-            assets.texWaterOcean, 64f, 14f,
-            0.90f, 0.96f, 1.0f,
-            0.03f, 0.92f, 52f, 0.48f,
-            uOffset = waveU,
-            vOffset = waveV,
-            normalTexId = assets.texWaterNormal,
-            normalStrength = 0.72f
+        // 1. 4800m x 4800m Multi-Biome Chunk-Streamed 3D Terrain, Curved Highways/Bridges & 360° Animated Ocean!
+        terrainChunkManager?.drawTerrainAndOcean(
+            dc = dc,
+            playerX = playerX,
+            playerZ = playerZ,
+            camPosX = camPosX,
+            camPosY = camPosY,
+            camPosZ = camPosZ,
+            lDirX = lDirX,
+            lDirY = lDirY,
+            lDirZ = lDirZ,
+            sunR = sunR,
+            sunG = sunG,
+            sunB = sunB,
+            ambientScale = ambScale,
+            fogR = fogR,
+            fogG = fogG,
+            fogB = fogB,
+            fogStart = fogStart,
+            fogEnd = fogEnd,
+            worldTime = worldTime,
+            graphicsQuality = graphicsQuality
         )
-        // Waterfront Paver Boardwalk (tex_footpath_paver_blocks) & Wooden Pier (tex_interior_wood_floor)
-        dc.drawQuad(0f, 0.025f, CityWorldData.WATERFRONT_Z - 2.5f, 960f, 8.2f, assets.texFootpathPaverBlocks, 200f, 2.2f, 0.96f, 0.96f, 0.95f, 0f, 0.16f + roadWetness * 0.35f, 18f, 0.06f + roadWetness * 0.25f)
-        // Port Container Dock Concrete Yards (East & West Waterfront)
-        dc.drawQuad(140f, 0.020f, 384f, 136f, 30f, assets.texConcrete, 26f, 6f, 0.74f, 0.76f, 0.78f, 0f, 0.12f, 14f, 0.04f)
-        dc.drawQuad(-120f, 0.020f, 384f, 96f, 30f, assets.texConcrete, 18f, 6f, 0.74f, 0.76f, 0.78f, 0f, 0.12f, 14f, 0.04f)
 
-        val pierCenterZ = CityWorldData.WATERFRONT_Z + 18f
-        if (isObjectInZoneAndCone(0f, pierCenterZ, 24f)) {
-            dc.bindVbo(assets.cubeMesh)
-            dc.drawBox(0f, 0.21f, pierCenterZ, 14.0f, 0.42f, 36.0f, assets.texInteriorWoodFloor, 4f, 10f, 0.88f, 0.76f, 0.64f, 0f, 0.22f, 16f, 0.04f)
-            dc.drawBox(-6.8f, 0.78f, pierCenterZ, 0.22f, 0.75f, 36.0f, assets.texWhite, 1f, 1f, 0.25f, 0.27f, 0.30f, 0f, 0.3f, 18f, 0.1f)
-            dc.drawBox( 6.8f, 0.78f, pierCenterZ, 0.22f, 0.75f, 36.0f, assets.texWhite, 1f, 1f, 0.25f, 0.27f, 0.30f, 0f, 0.3f, 18f, 0.1f)
+        // 1a. Saini Metro Core Ground, Waterfront Boardwalk, Port Concrete Yards & Wooden Pier (only when near Metro!)
+        val renderMetroSurface = abs(playerX) < 560f && playerZ in -560f..560f
+        if (renderMetroSurface) {
             dc.bindVbo(assets.quadMesh)
+            dc.drawQuad(0f, 0f, -8.5f, 896f, 832f, assets.texGrass, 120f, 110f, 0.74f, 0.78f, 0.64f, 0f, 0.03f, 6f, 0f)
+            // Sandy coastal edge along Saini Waterfront
+            dc.drawQuad(0f, 0.01f, CityWorldData.WATERFRONT_Z + 1.5f, 896f, 4.5f, assets.texConcrete, 90f, 1f, 0.92f, 0.84f, 0.68f, 0f, 0.08f, 12f, 0f)
+            // Waterfront Paver Boardwalk (tex_footpath_paver_blocks) & Wooden Pier (tex_interior_wood_floor)
+            dc.drawQuad(0f, 0.025f, CityWorldData.WATERFRONT_Z - 2.5f, 880f, 8.2f, assets.texFootpathPaverBlocks, 185f, 2.2f, 0.96f, 0.96f, 0.95f, 0f, 0.16f + roadWetness * 0.35f, 18f, 0.06f + roadWetness * 0.25f)
+            // Port Container Dock Concrete Yards (East & West Waterfront)
+            dc.drawQuad(140f, 0.020f, 384f, 136f, 30f, assets.texConcrete, 26f, 6f, 0.74f, 0.76f, 0.78f, 0f, 0.12f, 14f, 0.04f)
+            dc.drawQuad(-120f, 0.020f, 384f, 96f, 30f, assets.texConcrete, 18f, 6f, 0.74f, 0.76f, 0.78f, 0f, 0.12f, 14f, 0.04f)
+
+            val pierCenterZ = CityWorldData.WATERFRONT_Z + 18f
+            if (isObjectInZoneAndCone(0f, pierCenterZ, 24f)) {
+                dc.bindVbo(assets.cubeMesh)
+                dc.drawBox(0f, 0.21f, pierCenterZ, 14.0f, 0.42f, 36.0f, assets.texInteriorWoodFloor, 4f, 10f, 0.88f, 0.76f, 0.64f, 0f, 0.22f, 16f, 0.04f)
+                dc.drawBox(-6.8f, 0.78f, pierCenterZ, 0.22f, 0.75f, 36.0f, assets.texWhite, 1f, 1f, 0.25f, 0.27f, 0.30f, 0f, 0.3f, 18f, 0.1f)
+                dc.drawBox( 6.8f, 0.78f, pierCenterZ, 0.22f, 0.75f, 36.0f, assets.texWhite, 1f, 1f, 0.25f, 0.27f, 0.30f, 0f, 0.3f, 18f, 0.1f)
+                dc.bindVbo(assets.quadMesh)
+            }
         }
 
         // 1a. Urban Colony Concrete/Paver Pads (Y=0.014m) & Narrow Paved Colony Alleys / "Patli Galiyan" (Y=0.036m)
@@ -1448,8 +2615,8 @@ class OpenGLCityRenderer(
         }
         WorldAssetsDrawer.drawAirportGround(dc, worldTime) { x, z, r -> isObjectInZoneAndCone(x, z, r) }
 
-        // Update rigged Avaturn skeletal pose (including right-arm hand gate push!) before both shadow & main passes!
-        if (drivenCar == null) {
+        // Update rigged 6-animation skeletal pose (STAND / RUN / FLIP / HAND_FIGHT / LEG_FIGHT / RELEASE + gate push!)
+        if (drivenCar == null && drivenAiCar == null) {
             glbPlayer?.updatePose(
                 worldTime = worldTime,
                 walkCycle = if (riddenBike != null) 0f else walkCycle,
@@ -1457,12 +2624,17 @@ class OpenGLCityRenderer(
                 isSprinting = if (riddenBike != null) false else (input.isSprinting && isMovingNow),
                 isGrounded = isGrounded,
                 isRidingBike = riddenBike != null,
-                gateHandReach = gatePushBlend
+                gateHandReach = gatePushBlend,
+                forcedActionClip = if (riddenBike != null) null else activeActionClip,
+                actionTimeSec = activeActionTime,
+                loopForcedClip = false
             )
         }
 
-        // 2. SUN-PROJECTED SILHOUETTE SHADOW PASS
-        renderShapeAccurateShadowPass()
+        // 2. SUN-PROJECTED SILHOUETTE SHADOW PASS (controlled directly by Settings -> Shadows!)
+        if (shadowsEnabled && abs(playerX) < 465f && playerZ in -435f..420f) {
+            renderShapeAccurateShadowPass()
+        }
 
         // 3. Airport 3D Structures (Control Tower, Corrugated Hangar, Parked & Flying Jetliners)
         WorldAssetsDrawer.drawAirportStructures(dc, worldTime) { x, z, r -> isObjectInZoneAndCone(x, z, r) }
@@ -1508,13 +2680,60 @@ class OpenGLCityRenderer(
             WorldAssetsDrawer.drawBarbedFence(dc, fn)
         }
 
-        // 6. Realistic Multi-Part Branched Trees (Broad, Palm, Pine with tex_tree_bark) & 3D Grass Tufts
+        // 6. Realistic Multi-Part Branched Trees & World-Wide 18-Asset Multi-Biome Chunk-Streamed Grass Engine
         val treeStep = if (graphicsQuality == GraphicsQuality.LOW) 2 else 1
         for (i in visTrees.indices step treeStep) {
             CityPropDrawer.drawRealisticTree(dc, visTrees[i], worldTime, graphicsQuality)
         }
-        val grassStep = if (graphicsQuality == GraphicsQuality.LOW) 3 else if (graphicsQuality == GraphicsQuality.MEDIUM) 2 else 1
-        WorldAssetsDrawer.drawGrassTufts(dc, visGrassTufts, worldTime, grassStep)
+        val grassPushRadius = when {
+            drivenCar != null || drivenAiCar != null -> 2.65f
+            riddenBike != null -> 1.55f
+            else -> 1.25f
+        }
+        val grassFogStart = fogStart.coerceAtLeast(110f)
+        val grassFogEnd = (fogEnd + 320f).coerceAtLeast(620f)
+        grassSystem?.drawVisibleGrass(
+            vpMatrix = dc.vpMatrix,
+            worldTime = worldTime,
+            playerX = playerX,
+            playerY = playerY,
+            playerZ = playerZ,
+            playerPushRadius = grassPushRadius,
+            camPosX = camPosX,
+            camPosY = camPosY,
+            camPosZ = camPosZ,
+            camFwdX = camForwardX,
+            camFwdZ = camForwardZ,
+            lDirX = lDirX,
+            lDirY = lDirY,
+            lDirZ = lDirZ,
+            sunR = sunR,
+            sunG = sunG,
+            sunB = sunB,
+            ambientScale = ambScale,
+            fogR = fogR,
+            fogG = fogG,
+            fogB = fogB,
+            fogStart = grassFogStart,
+            fogEnd = grassFogEnd,
+            rainIntensity = rainIntensity,
+            graphicsQuality = graphicsQuality,
+            grassDensity = grassDensity
+        )
+        // Restore main CityShaderProgram & VBO tracking cleanly for subsequent city props
+        GLES20.glUseProgram(assets.shader.programId)
+        dc.boundVboId = -1
+
+        // 6b. Multi-Biome Regional Forests, Overseas Sea Bridge Piers & Iconic 3D Landmarks across all 7 Regions!
+        terrainChunkManager?.drawRegionalLandmarksAndTrees(
+            dc = dc,
+            playerX = playerX,
+            playerZ = playerZ,
+            worldTime = worldTime,
+            nightFactor = nightFactor,
+            graphicsQuality = graphicsQuality,
+            streamRadius = streamingRadiusMeters
+        )
 
         // 7. Streetlights, Traffic Signals, Park Benches, Street Kiosks
         val lightStep = if (graphicsQuality == GraphicsQuality.LOW) 2 else 1
@@ -1532,16 +2751,56 @@ class OpenGLCityRenderer(
             CityPropDrawer.drawKiosk(dc, k)
         }
 
-        // 8. Realistic Curved GTA-Style Cars & Royal Enfield Bullet Motorcycles (with spinning tex_vehicle_tire_tread!)
+        // 8. Realistic Curved GTA-Style Cars & Royal Enfield Bullet Motorcycles (with 3D Slope Pitch/Roll & Seated Bike Rider!)
+        val wrap = vehicleWrapRgb
         for (pc in visParkedCars) {
-            CityPropDrawer.drawCar(dc, pc.x, pc.z, pc.yawDeg, pc.wheelAngleDeg, pc.r, pc.g, pc.b)
+            val isActive = pc === drivenCar
+            val gY: Float
+            val pitch: Float
+            val roll: Float
+            if (isActive) {
+                gY = playerY
+                pitch = pc.pitchDeg
+                roll = pc.rollDeg
+            } else {
+                val o = sampleVehicleOrientation(pc.x, pc.z, pc.yawDeg, 1.38f, 0.88f)
+                gY = o.supportY
+                pitch = o.pitchDeg
+                roll = o.rollDeg
+                pc.pitchDeg = pitch
+                pc.rollDeg = roll
+            }
+            val cr = if (isActive && wrap != null) wrap[0] else pc.r
+            val cg = if (isActive && wrap != null) wrap[1] else pc.g
+            val cb = if (isActive && wrap != null) wrap[2] else pc.b
+            CityPropDrawer.drawCar(dc, pc.x, pc.z, pc.yawDeg, pc.wheelAngleDeg, cr, cg, cb, groundY = gY, pitchDeg = pitch, rollDeg = roll)
         }
         for (bike in visBulletBikes) {
-            WorldAssetsDrawer.drawBulletBike(dc, bike, isRidden = (bike === riddenBike))
+            val isRiddenNow = bike === riddenBike
+            val gY = if (isRiddenNow) {
+                playerY
+            } else {
+                val o = sampleVehicleOrientation(bike.x, bike.z, bike.yawDeg, 0.72f, 0.32f)
+                bike.pitchDeg = o.pitchDeg
+                bike.rollDeg = o.rollDeg
+                o.supportY
+            }
+            WorldAssetsDrawer.drawBulletBike(
+                dc = dc,
+                bike = bike,
+                isRidden = isRiddenNow,
+                groundY = gY,
+                riderSpeed = if (isRiddenNow) vehicleSpeed else 0f,
+                worldTime = worldTime
+            )
         }
         for (car in visMovingCars) {
-            val yawDeg = if (car.axisX) (if (car.dir > 0f) 90f else -90f) else (if (car.dir > 0f) 0f else 180f)
-            CityPropDrawer.drawCar(dc, car.x, car.z, yawDeg, car.wheelAngleDeg, car.r, car.g, car.b)
+            val isActive = car === drivenAiCar
+            val gY = if (isActive) playerY else sampleVehicleOrientation(car.x, car.z, car.yawDeg, 1.38f, 0.88f).supportY
+            val cr = if (isActive && wrap != null) wrap[0] else car.r
+            val cg = if (isActive && wrap != null) wrap[1] else car.g
+            val cb = if (isActive && wrap != null) wrap[2] else car.b
+            CityPropDrawer.drawCar(dc, car.x, car.z, car.yawDeg, car.wheelAngleDeg, cr, cg, cb, groundY = gY, pitchDeg = car.pitchDeg, rollDeg = car.rollDeg)
         }
 
         // 9. Autonomous NPC Men & Women Pedestrians + Soaring Feathered Birds
@@ -1562,30 +2821,31 @@ class OpenGLCityRenderer(
             )
         }
 
-        // 11. Rigged Avaturn 3D Player Character (assets/player.glb — hidden inside car cabin when driving, seated on Bullet when riding!)
-        if (drivenCar == null) {
-            val riderYOffset = if (riddenBike != null) 0.42f else 0f
+        // 11. Rigged Avaturn 3D Player Character (hidden inside cars; seated bike rider drawn inside drawBulletBike!)
+        if (drivenCar == null && drivenAiCar == null && riddenBike == null) {
             val rigged = glbPlayer
             if (rigged != null) {
                 rigged.draw(
                     dc = dc,
-                    x = playerX, y = playerY + riderYOffset, z = playerZ,
+                    x = playerX, y = playerY, z = playerZ,
                     yawRad = playerFacingYaw,
                     lightDirX = lDirX, lightDirY = lDirY, lightDirZ = lDirZ,
                     sunR = sunR, sunG = sunG, sunB = sunB,
                     ambientScale = ambScale,
                     camX = camPosX, camY = camPosY, camZ = camPosZ,
                     fogR = fogR, fogG = fogG, fogB = fogB,
-                    fogStart = fogStart, fogEnd = fogEnd
+                    fogStart = fogStart, fogEnd = fogEnd,
+                    slopePitchDeg = playerSlopePitchDeg,
+                    slopeRollDeg = playerSlopeRollDeg
                 )
             } else {
                 CityPropDrawer.drawHumanPlayer(
                     dc = dc,
-                    x = playerX, y = playerY + riderYOffset, z = playerZ,
+                    x = playerX, y = playerY, z = playerZ,
                     yawRad = playerFacingYaw,
-                    walkCycle = if (riddenBike != null) 0f else walkCycle,
-                    isMoving = if (riddenBike != null) false else isMovingNow,
-                    isSprinting = if (riddenBike != null) false else (input.isSprinting && isMovingNow),
+                    walkCycle = walkCycle,
+                    isMoving = isMovingNow,
+                    isSprinting = input.isSprinting && isMovingNow,
                     isGrounded = isGrounded,
                     worldTime = worldTime,
                     skin = activeSkin
@@ -1593,27 +2853,28 @@ class OpenGLCityRenderer(
             }
         }
 
-        // 12. Active Map Waypoint Tactical Beacon (visible from afar in 3D city!)
+        // 12. Active Map Waypoint Tactical Beacon (anchored cleanly to 3D terrain elevation!)
         if (waypointActive) {
+            val wy = WorldMapData.getTerrainHeight(waypointX, waypointZ)
             val pulse = 0.85f + 0.15f * sin(worldTime * 4.5f)
             GLES20.glDepthMask(false)
             GLES20.glDisable(GLES20.GL_CULL_FACE)
             dc.bindVbo(assets.cylinderMesh)
             dc.drawMeshTransformed(
-                waypointX, 26f, waypointZ,
+                waypointX, wy + 26f, waypointZ,
                 0.72f * pulse, 52f, 0.72f * pulse,
                 0f, 0f, 0f,
                 assets.texWhite, 1f, 1f,
-                1.0f, 0.80f, 0.16f, 0.28f,
+                1.0f, 0.27f, 0.33f, 0.28f,
                 1.0f, 0.1f, 8f, 0f, assets.cylinderMesh
             )
             dc.bindVbo(assets.ringMesh)
             dc.drawMeshTransformed(
-                waypointX, 0.12f, waypointZ,
+                waypointX, wy + 0.14f, waypointZ,
                 3.4f * pulse, 1f, 3.4f * pulse,
                 0f, 0f, 0f,
                 assets.texWhite, 1f, 1f,
-                1.0f, 0.82f, 0.18f, 0.75f,
+                1.0f, 0.27f, 0.33f, 0.75f,
                 1.0f, 0.1f, 8f, 0f, assets.ringMesh
             )
             GLES20.glEnable(GLES20.GL_CULL_FACE)
@@ -1678,26 +2939,33 @@ class OpenGLCityRenderer(
             dc.commitShadow(assets.texWhite, assets.cubeMesh.vertexCount)
         }
 
-        // Tree shadows (branches + alpha-cutout broad/palm/pine leaves!)
-        val treeStep = if (graphicsQuality == GraphicsQuality.LOW) 2 else 1
-        for (i in visTrees.indices step treeStep) {
-            CityPropDrawer.drawTreeShadow(dc, visTrees[i], worldTime, graphicsQuality)
+        // Tree shadows (limited to nearby 42m for silky smooth mobile FPS!)
+        val treeShadowStep = if (graphicsQuality == GraphicsQuality.MEDIUM) 2 else 1
+        for (i in visTrees.indices step treeShadowStep) {
+            val t = visTrees[i]
+            val tdx = t.x - playerX; val tdz = t.z - playerZ
+            if (tdx * tdx + tdz * tdz > 44f * 44f) continue
+            CityPropDrawer.drawTreeShadow(dc, t, worldTime, graphicsQuality)
         }
 
-        // Poles
+        // Poles (nearby 38m)
         for (sl in visStreetLights) {
-            CityPropDrawer.drawPoleShadow(dc, sl.x, sl.z, 5.5f, sl.dirX, sl.dirZ)
+            val dx = sl.x - playerX; val dz = sl.z - playerZ
+            if (dx * dx + dz * dz <= 38f * 38f) CityPropDrawer.drawPoleShadow(dc, sl.x, sl.z, 5.5f, sl.dirX, sl.dirZ)
         }
         for (ts in visTrafficSignals) {
-            CityPropDrawer.drawPoleShadow(dc, ts.x, ts.z, 5.8f, ts.armDirX, ts.armDirZ)
+            val dx = ts.x - playerX; val dz = ts.z - playerZ
+            if (dx * dx + dz * dz <= 38f * 38f) CityPropDrawer.drawPoleShadow(dc, ts.x, ts.z, 5.8f, ts.armDirX, ts.armDirZ)
         }
 
-        // Parked & Moving Car, Bullet Bike, Army Bunker & Army Vehicle shadows
+        // Parked & Moving Car, Bullet Bike, Army Bunker & Army Vehicle shadows (aligned to 3D terrain slope!)
         for (pc in visParkedCars) {
-            CityPropDrawer.drawCarShadow(dc, pc.x, pc.z, pc.yawDeg)
+            val gY = if (pc === drivenCar) playerY else WorldMapData.getTerrainHeight(pc.x, pc.z)
+            CityPropDrawer.drawCarShadow(dc, pc.x, pc.z, pc.yawDeg, groundY = gY, pitchDeg = pc.pitchDeg, rollDeg = pc.rollDeg)
         }
         for (bike in visBulletBikes) {
-            WorldAssetsDrawer.drawBulletBikeShadow(dc, bike)
+            val gY = if (bike === riddenBike) playerY else WorldMapData.getTerrainHeight(bike.x, bike.z)
+            WorldAssetsDrawer.drawBulletBikeShadow(dc, bike, groundY = gY)
         }
         for (bk in visArmyBunkers) {
             WorldAssetsDrawer.drawArmyBunkerShadow(dc, bk)
@@ -1706,21 +2974,23 @@ class OpenGLCityRenderer(
             WorldAssetsDrawer.drawArmyVehicleShadow(dc, av)
         }
         for (car in visMovingCars) {
-            val yawDeg = if (car.axisX) (if (car.dir > 0f) 90f else -90f) else (if (car.dir > 0f) 0f else 180f)
-            CityPropDrawer.drawCarShadow(dc, car.x, car.z, yawDeg)
+            val gY = if (car === drivenAiCar) playerY else WorldMapData.getTerrainHeight(car.x, car.z)
+            CityPropDrawer.drawCarShadow(dc, car.x, car.z, car.yawDeg, groundY = gY, pitchDeg = car.pitchDeg, rollDeg = car.rollDeg)
         }
 
         // NPC Men/Women & Player human shadows
         for (npc in visNpcs) {
-            CityPropDrawer.drawHumanShadow(dc, npc.x, 0f, npc.z, npc.yawRad, npc.walkPhase, npc.pauseTimer <= 0f, npc.isWoman)
+            val dx = npc.x - playerX; val dz = npc.z - playerZ
+            if (dx * dx + dz * dz <= 36f * 36f) {
+                CityPropDrawer.drawHumanShadow(dc, npc.x, 0f, npc.z, npc.yawRad, npc.walkPhase, npc.pauseTimer <= 0f || npc.fleeTimer > 0f, npc.isWoman)
+            }
         }
-        if (drivenCar == null) {
-            val riderYOffset = if (riddenBike != null) 0.42f else 0f
+        if (drivenCar == null && drivenAiCar == null && riddenBike == null) {
             val rigged = glbPlayer
             if (rigged != null) {
-                rigged.drawShadow(dc, playerX, playerY + riderYOffset, playerZ, playerFacingYaw, shadowAlpha)
+                rigged.drawShadow(dc, playerX, playerY, playerZ, playerFacingYaw, shadowAlpha, slopePitchDeg = playerSlopePitchDeg, slopeRollDeg = playerSlopeRollDeg)
             } else {
-                CityPropDrawer.drawHumanShadow(dc, playerX, playerY + riderYOffset, playerZ, playerFacingYaw, walkCycle, isMovingNow, false)
+                CityPropDrawer.drawHumanShadow(dc, playerX, playerY, playerZ, playerFacingYaw, walkCycle, isMovingNow, false)
             }
         }
 
@@ -1813,7 +3083,10 @@ class CityGLSurfaceView(
 ) : GLSurfaceView(context) {
     private val stencilChooser = StencilEGLConfigChooser()
     val cityRenderer: OpenGLCityRenderer
-    private var desiredFrameRate = 120f
+    private var desiredFrameRate = 60f
+    private var currentRenderScale = 1.0f
+    private var nativeWidth = 0
+    private var nativeHeight = 0
 
     init {
         setEGLContextClientVersion(2)
@@ -1822,6 +3095,28 @@ class CityGLSurfaceView(
         cityRenderer = OpenGLCityRenderer(context, inputState, listener) { stencilChooser.hasStencil }
         setRenderer(cityRenderer)
         renderMode = RENDERMODE_CONTINUOUSLY
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w > 0 && h > 0) {
+            nativeWidth = w
+            nativeHeight = h
+            applyRenderResolutionScale(currentRenderScale)
+        }
+    }
+
+    fun applyRenderResolutionScale(scale: Float) {
+        val clamped = scale.coerceIn(0.65f, 1.0f)
+        currentRenderScale = clamped
+        if (nativeWidth <= 0 || nativeHeight <= 0) return
+        if (clamped >= 0.99f) {
+            runCatching { holder.setSizeFromLayout() }
+        } else {
+            val targetW = (nativeWidth * clamped).toInt().coerceAtLeast(640)
+            val targetH = (nativeHeight * clamped).toInt().coerceAtLeast(360)
+            runCatching { holder.setFixedSize(targetW, targetH) }
+        }
     }
 
     fun applyTargetFrameRate(fps: Int) {
@@ -1842,5 +3137,6 @@ class CityGLSurfaceView(
     override fun surfaceCreated(holder: SurfaceHolder) {
         super.surfaceCreated(holder)
         applyTargetFrameRate(desiredFrameRate.toInt())
+        applyRenderResolutionScale(currentRenderScale)
     }
 }

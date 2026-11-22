@@ -47,6 +47,7 @@ class GameAudioEngine(context: Context) {
     @Volatile var musicVolume: Float = 0.65f
     @Volatile var sfxVolume: Float = 0.85f
     @Volatile var isMuted: Boolean = false
+    @Volatile var ambientAudioEnabled: Boolean = true
     @Volatile private var isLobbyActive = false
     @Volatile private var isGameplayAudioActive = false
     @Volatile private var isReleased = false
@@ -228,10 +229,11 @@ class GameAudioEngine(context: Context) {
     // MASTER MUTE & VOLUME SYNC
     // -------------------------------------------------------------------------
 
-    fun applyAudioSettings(musicVol: Float, sfxVol: Float, muted: Boolean) {
+    fun applyAudioSettings(musicVol: Float, sfxVol: Float, muted: Boolean, ambientEnabled: Boolean = true) {
         musicVolume = musicVol.coerceIn(0f, 1f)
         sfxVolume = sfxVol.coerceIn(0f, 1f)
         isMuted = muted
+        ambientAudioEnabled = ambientEnabled
 
         runOnAudioThread {
             if (isMuted) {
@@ -337,7 +339,7 @@ class GameAudioEngine(context: Context) {
         }
 
         val sfxMaster = sfxVolume.coerceIn(0f, 1f)
-        val envMaster = (musicVolume * 0.65f + sfxVolume * 0.35f).coerceIn(0f, 1f)
+        val envMaster = if (ambientAudioEnabled) (musicVolume * 0.65f + sfxVolume * 0.35f).coerceIn(0f, 1f) else 0f
         val isIndoors = snapIsIndoors
         val indoorDamp = if (isIndoors) 0.28f else 1.0f
 

@@ -18,11 +18,25 @@ import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+enum class PlayerAnimClip {
+    STAND,
+    RUN,
+    FLIP,
+    HAND_FIGHT,
+    LEG_FIGHT,
+    RELEASE
+}
+
 /**
- * Native OpenGL ES 2.0 glTF 2.0 (.glb) GPU-Skinned Rigged Character Loader & Animator.
- * Loads assets/player.glb (Avaturn 52-joint rigged character, 5 skinned meshes, embedded PBR
- * textures, alpha MASK & BLEND hair materials, and embedded gesture_1 clip) and blends
- * smoothly with procedural Walk, Sprint, Jump, and Bullet-Riding skeletal animations.
+ * Native OpenGL ES 2.0 glTF 2.0 (.glb) GPU-Skinned Multi-Animation Character Loader & Animator.
+ * Loads assets/playerstand.glb (52-joint rigged character, 5 skinned meshes, embedded PBR textures,
+ * alpha MASK & BLEND hair materials, STAND clip) + all 5 extracted lossless motion-capture clips:
+ *   - playerrun.glb       -> RUN (walking & sprinting locomotion)
+ *   - playerflip.glb      -> FLIP (acrobatic flip, jump & parkour)
+ *   - playerhandfight.glb -> HAND_FIGHT (punch combo)
+ *   - plauerlegfight.glb  -> LEG_FIGHT (kick attack)
+ *   - playerrelease.glb   -> RELEASE (drop / tactical landing & release)
+ * with smooth zero-GC crossfade blending between every state.
  */
 class GlbSkinnedPlayer private constructor(
     private val shader: SkinnedMeshShader,
@@ -31,10 +45,19 @@ class GlbSkinnedPlayer private constructor(
     private val jointNodeIndices: IntArray,
     private val inverseBindMatrices: FloatArray,
     private val meshes: List<SkinnedSubMesh>,
-    private val idleClip: GlbAnimClip?
+    private val clips: MutableMap<PlayerAnimClip, GlbAnimClip>
 ) {
 
     private val nodeByName: Map<String, Int> = nodes.withIndex().associate { (i, n) -> n.name to i }
+
+    fun loadExtraClipStep(context: Context, stepIndex: Int): Boolean {
+        if (stepIndex !in EXTRA_CLIP_SPECS.indices) return false
+        val (clipEnum, sanimPath, stripXZ) = EXTRA_CLIP_SPECS[stepIndex]
+        loadSanimClip(context, sanimPath, nodeByName, stripXZ)?.let { loaded ->
+            clips[clipEnum] = loaded
+        }
+        return stepIndex + 1 < EXTRA_CLIP_SPECS.size
+    }
 
     // Key anatomical bone indices (resolved once on load)
     private val idxHips = nodeByName["Hips"] ?: -1
@@ -58,6 +81,8 @@ class GlbSkinnedPlayer private constructor(
     private val curT = Array(nodes.size) { FloatArray(3) }
     private val curR = Array(nodes.size) { FloatArray(4) }
     private val curS = Array(nodes.size) { FloatArray(3) }
+    private val prevT = Array(nodes.size) { FloatArray(3) }
+    private val prevR = Array(nodes.size) { FloatArray(4) }
     private val localMat = Array(nodes.size) { FloatArray(16) }
     private val worldMat = Array(nodes.size) { FloatArray(16) }
     private val skinMat = FloatArray(16)
@@ -65,12 +90,15 @@ class GlbSkinnedPlayer private constructor(
     private val modelMat = FloatArray(16)
     private val shadowModelMat = FloatArray(16)
 
-    // Smooth animation state
+    // Multi-clip playback & crossfade state
     private var lastWorldTime = -1f
-    private var idleTime = 0f
-    private var moveBlend = 0f
-    private var sprintBlend = 0f
-    private var airBlend = 0f
+    private var activeClip: PlayerAnimClip = PlayerAnimClip.STAND
+    private var hasInitializedPose = false
+    private var crossfadeElapsed = 1f
+    private var crossfadeDuration = 0.14f
+    private var standTime = 0f
+    private var runTime = 0f
+    private var airFlipTime = 0.52f
     private var bikeBlend = 0f
 
     // Reusable quaternion scratch arrays
@@ -79,6 +107,10 @@ class GlbSkinnedPlayer private constructor(
     private val qTmp3 = FloatArray(4)
     private val qTarget = FloatArray(4)
 
+    fun getClipDuration(clip: PlayerAnimClip): Float {
+        return clips[clip]?.duration ?: 1.2f
+    }
+
     fun updatePose(
         worldTime: Float,
         walkCycle: Float,
@@ -86,20 +118,45 @@ class GlbSkinnedPlayer private constructor(
         isSprinting: Boolean,
         isGrounded: Boolean,
         isRidingBike: Boolean,
-        gateHandReach: Float = 0f
+        gateHandReach: Float = 0f,
+        forcedActionClip: PlayerAnimClip? = null,
+        actionTimeSec: Float = 0f,
+        loopForcedClip: Boolean = false
     ) {
         val dt = if (lastWorldTime < 0f) 0.016f else (worldTime - lastWorldTime).coerceIn(0f, 0.05f)
         lastWorldTime = worldTime
 
-        val targetMove = if (isMoving && isGrounded && !isRidingBike) 1f else 0f
-        val targetSprint = if (isSprinting && isMoving && isGrounded && !isRidingBike) 1f else 0f
-        val targetAir = if (!isGrounded && !isRidingBike) 1f else 0f
         val targetBike = if (isRidingBike) 1f else 0f
-
-        moveBlend += (targetMove - moveBlend) * (dt * 11f).coerceAtMost(1f)
-        sprintBlend += (targetSprint - sprintBlend) * (dt * 8.5f).coerceAtMost(1f)
-        airBlend += (targetAir - airBlend) * (dt * 12f).coerceAtMost(1f)
         bikeBlend += (targetBike - bikeBlend) * (dt * 12f).coerceAtMost(1f)
+
+        // Determine desired real GLB animation clip
+        val desiredClip: PlayerAnimClip = when {
+            forcedActionClip != null -> forcedActionClip
+            isRidingBike -> PlayerAnimClip.STAND
+            !isGrounded -> PlayerAnimClip.FLIP
+            isMoving -> PlayerAnimClip.RUN
+            else -> PlayerAnimClip.STAND
+        }
+
+        // Snapshot previous pose & trigger smooth crossfade whenever clip changes
+        if (desiredClip != activeClip) {
+            if (hasInitializedPose) {
+                for (i in nodes.indices) {
+                    prevT[i][0] = curT[i][0]; prevT[i][1] = curT[i][1]; prevT[i][2] = curT[i][2]
+                    prevR[i][0] = curR[i][0]; prevR[i][1] = curR[i][1]; prevR[i][2] = curR[i][2]; prevR[i][3] = curR[i][3]
+                }
+                crossfadeElapsed = 0f
+                crossfadeDuration = when {
+                    desiredClip == PlayerAnimClip.HAND_FIGHT || desiredClip == PlayerAnimClip.LEG_FIGHT -> 0.10f
+                    desiredClip == PlayerAnimClip.FLIP || desiredClip == PlayerAnimClip.RELEASE -> 0.11f
+                    else -> 0.16f
+                }
+            }
+            if (desiredClip == PlayerAnimClip.FLIP && forcedActionClip == null) {
+                airFlipTime = 0.52f // Jump straight into upward launch phase
+            }
+            activeClip = desiredClip
+        }
 
         // 1. Reset every node to rest pose
         for (i in nodes.indices) {
@@ -109,27 +166,63 @@ class GlbSkinnedPlayer private constructor(
             curS[i][0] = n.restS[0]; curS[i][1] = n.restS[1]; curS[i][2] = n.restS[2]
         }
 
-        // 2. Sample embedded `gesture_1` clip smoothly when standing idle (and as blend base!)
-        val clip = idleClip
+        // 2. Sample active motion-capture clip from the 6 user GLBs
+        val clip = clips[desiredClip] ?: clips[PlayerAnimClip.STAND]
         if (clip != null && clip.duration > 0.01f) {
-            idleTime = (idleTime + dt) % clip.duration
-            sampleClip(clip, idleTime)
+            val sampleTime = when {
+                forcedActionClip != null -> {
+                    if (loopForcedClip) {
+                        val mod = actionTimeSec % clip.duration
+                        if (mod < 0f) mod + clip.duration else mod
+                    } else {
+                        actionTimeSec.coerceIn(0f, clip.duration)
+                    }
+                }
+                desiredClip == PlayerAnimClip.RUN -> {
+                    val rate = if (isSprinting) 1.24f else 0.80f
+                    runTime = (runTime + dt * rate) % clip.duration
+                    runTime
+                }
+                desiredClip == PlayerAnimClip.FLIP -> {
+                    airFlipTime = (airFlipTime + dt * 1.18f).coerceAtMost(1.55f)
+                    airFlipTime
+                }
+                else -> {
+                    standTime = (standTime + dt) % clip.duration
+                    standTime
+                }
+            }
+            sampleClip(clip, sampleTime)
         }
 
-        // 3. Smoothly blend procedural Walk / Run / Jump / Bullet-Riding poses onto key bones
-        val locoWeight = max(moveBlend, max(airBlend, bikeBlend)).coerceIn(0f, 1f)
-        if (locoWeight > 0.005f) {
-            applyProceduralLocomotion(walkCycle, locoWeight)
+        // 3. Smooth crossfade from previous clip pose into newly sampled pose (ZERO snap/pop!)
+        if (hasInitializedPose && crossfadeElapsed < crossfadeDuration) {
+            crossfadeElapsed += dt
+            val w = (crossfadeElapsed / crossfadeDuration).coerceIn(0f, 1f)
+            // Smoothstep easing for organic transitions
+            val smoothW = w * w * (3f - 2f * w)
+            for (i in nodes.indices) {
+                curT[i][0] = lerp(prevT[i][0], curT[i][0], smoothW)
+                curT[i][1] = lerp(prevT[i][1], curT[i][1], smoothW)
+                curT[i][2] = lerp(prevT[i][2], curT[i][2], smoothW)
+                quatSlerp(prevR[i], curR[i], smoothW, qTmp3)
+                curR[i][0] = qTmp3[0]; curR[i][1] = qTmp3[1]; curR[i][2] = qTmp3[2]; curR[i][3] = qTmp3[3]
+            }
+        }
+        hasInitializedPose = true
+
+        // 3b. Bullet 350 seated riding posture overlay when riding motorcycle
+        if (bikeBlend > 0.005f && forcedActionClip == null) {
+            applyBikeRidingPose(bikeBlend)
         }
 
-        // 3b. Hand-controlled gate push/pull reach pose on Right Arm & Torso when holding Open/Close Gate!
+        // 3c. Hand-controlled gate push/pull reach pose on Right Arm & Torso when holding Open/Close Gate!
         val reachW = gateHandReach.coerceIn(0f, 1f)
-        if (reachW > 0.01f) {
+        if (reachW > 0.01f && forcedActionClip == null) {
             val pushPulse = sin(worldTime * 7.5f) * 6f
             blendBoneEulerDelta(idxSpine1, 7f, -10f, 0f, reachW * 0.7f)
             blendBoneEulerDelta(idxSpine2, 5f, -8f, 0f, reachW * 0.7f)
             if (idxRightArm >= 0) {
-                // Raise right arm straight forward toward gate handle/rail
                 quatFromAxisAngle(1f, 0f, 0f, 22f, qTmp1)
                 quatFromAxisAngle(0f, 1f, 0f, 76f + pushPulse, qTmp2)
                 quatMul(qTmp2, qTmp1, qTmp3)
@@ -150,92 +243,50 @@ class GlbSkinnedPlayer private constructor(
             val nodeIdx = jointNodeIndices[j]
             Matrix.multiplyMM(skinMat, 0, worldMat[nodeIdx], 0, inverseBindMatrices, j * 16)
             val base = j * 12
-            // Pack 3 rows of column-major 4x4 affine matrix for fast dot(row, pos) in vertex shader
             jointRows[base + 0] = skinMat[0];  jointRows[base + 1] = skinMat[4];  jointRows[base + 2] = skinMat[8];  jointRows[base + 3] = skinMat[12]
             jointRows[base + 4] = skinMat[1];  jointRows[base + 5] = skinMat[5];  jointRows[base + 6] = skinMat[9];  jointRows[base + 7] = skinMat[13]
             jointRows[base + 8] = skinMat[2];  jointRows[base + 9] = skinMat[6];  jointRows[base + 10] = skinMat[10]; jointRows[base + 11] = skinMat[14]
         }
     }
 
-    private fun applyProceduralLocomotion(walkCycle: Float, locoWeight: Float) {
-        val walkOnlyWeight = (moveBlend * (1f - airBlend) * (1f - bikeBlend)).coerceIn(0f, 1f)
-        val strideSin = sin(walkCycle)
-        val strideCos = cos(walkCycle)
-
-        val legSwingAmp = 28f + sprintBlend * 22f // Degrees
-        val kneeBendMax = 38f + sprintBlend * 38f
-        val armSwingAmp = 24f + sprintBlend * 28f
-
-        // --- Hips vertical bob, subtle sway, and crouch/jump offset ---
+    private fun applyBikeRidingPose(weight: Float) {
+        val w = weight.coerceIn(0f, 1f)
         if (idxHips >= 0) {
             val n = nodes[idxHips]
-            val walkBobY = (abs(strideSin) * (0.042f + sprintBlend * 0.036f) - 0.025f) * walkOnlyWeight
-            val airDropY = -0.06f * airBlend
-            val bikeDropY = -0.22f * bikeBlend
-            val targetTx = n.restT[0] + strideSin * 0.016f * walkOnlyWeight
-            val targetTy = n.restT[1] + walkBobY + airDropY + bikeDropY
-            val targetTz = n.restT[2]
-            curT[idxHips][0] = lerp(curT[idxHips][0], targetTx, locoWeight)
-            curT[idxHips][1] = lerp(curT[idxHips][1], targetTy, locoWeight)
-            curT[idxHips][2] = lerp(curT[idxHips][2], targetTz, locoWeight)
-
-            val hipRoll = strideSin * (2.4f + sprintBlend * 1.8f) * walkOnlyWeight
-            val hipYaw = strideSin * (4.5f + sprintBlend * 3.5f) * walkOnlyWeight
-            quatFromEulerXYZ(0f, hipYaw, hipRoll, qTmp1)
-            quatMul(n.restR, qTmp1, qTarget)
-            quatSlerpInPlace(curR[idxHips], qTarget, locoWeight)
+            curT[idxHips][0] = lerp(curT[idxHips][0], n.restT[0], w)
+            curT[idxHips][1] = lerp(curT[idxHips][1], n.restT[1] - 0.22f, w)
+            curT[idxHips][2] = lerp(curT[idxHips][2], n.restT[2], w)
+            quatSlerpInPlace(curR[idxHips], n.restR, w)
         }
+        blendBoneEulerDelta(idxSpine, 5.6f, 0f, 0f, w)
+        blendBoneEulerDelta(idxSpine1, 4.9f, 0f, 0f, w)
+        blendBoneEulerDelta(idxSpine2, 3.5f, 0f, 0f, w)
+        blendBoneEulerDelta(idxNeck, -6.3f, 0f, 0f, w)
+        blendBoneEulerDelta(idxHead, -4.2f, 0f, 0f, w)
 
-        // --- Spine, Spine1, Spine2: forward run lean + counter-twist ---
-        val leanDeg = (4.5f + sprintBlend * 11.5f) * walkOnlyWeight + 8f * airBlend + 14f * bikeBlend
-        val twistDeg = -strideSin * (5.5f + sprintBlend * 5.5f) * walkOnlyWeight
-        blendBoneEulerDelta(idxSpine, leanDeg * 0.40f, twistDeg * 0.35f, 0f, locoWeight)
-        blendBoneEulerDelta(idxSpine1, leanDeg * 0.35f, twistDeg * 0.35f, 0f, locoWeight)
-        blendBoneEulerDelta(idxSpine2, leanDeg * 0.25f, twistDeg * 0.30f, 0f, locoWeight)
-        // Stabilize Neck/Head slightly so character looks forward while sprinting
-        blendBoneEulerDelta(idxNeck, -leanDeg * 0.45f, -twistDeg * 0.45f, 0f, locoWeight)
-        blendBoneEulerDelta(idxHead, -leanDeg * 0.30f, -twistDeg * 0.30f, 0f, locoWeight)
-
-        // --- Legs (in UpLeg/Leg local space: +X swings forward, -X bends knee backward!) ---
-        val leftThighDeg = (strideSin * legSwingAmp) * walkOnlyWeight + 26f * airBlend + 62f * bikeBlend
-        val rightThighDeg = (-strideSin * legSwingAmp) * walkOnlyWeight - 12f * airBlend + 62f * bikeBlend
-        val leftKneeDeg = (-max(0f, -strideCos) * kneeBendMax - 6f) * walkOnlyWeight - 52f * airBlend - 68f * bikeBlend
-        val rightKneeDeg = (-max(0f, strideCos) * kneeBendMax - 6f) * walkOnlyWeight - 28f * airBlend - 68f * bikeBlend
-        val leftAnkleDeg = (-strideSin * 10f) * walkOnlyWeight - 18f * airBlend + 10f * bikeBlend
-        val rightAnkleDeg = (strideSin * 10f) * walkOnlyWeight - 12f * airBlend + 10f * bikeBlend
-
-        blendBoneEulerDelta(idxLeftUpLeg, leftThighDeg, 0f, if (bikeBlend > 0.1f) -14f * bikeBlend else 0f, locoWeight)
-        blendBoneEulerDelta(idxRightUpLeg, rightThighDeg, 0f, if (bikeBlend > 0.1f) 14f * bikeBlend else 0f, locoWeight)
-        blendBoneEulerDelta(idxLeftLeg, leftKneeDeg, 0f, 0f, locoWeight)
-        blendBoneEulerDelta(idxRightLeg, rightKneeDeg, 0f, 0f, locoWeight)
-        blendBoneEulerDelta(idxLeftFoot, leftAnkleDeg, 0f, 0f, locoWeight)
-        blendBoneEulerDelta(idxRightFoot, rightAnkleDeg, 0f, 0f, locoWeight)
-
-        // --- Arms (exact Avaturn rest-space axes: +74° localX lowers from T-pose; localY swings forward/back!) ---
-        val leftArmSwing = (-strideSin * armSwingAmp) * walkOnlyWeight + 42f * airBlend + 54f * bikeBlend
-        val rightArmSwing = (strideSin * armSwingAmp) * walkOnlyWeight + 42f * airBlend + 54f * bikeBlend
-        val armLowerDeg = 74f - 18f * airBlend - 12f * bikeBlend
+        blendBoneEulerDelta(idxLeftUpLeg, 62f, 0f, -14f, w)
+        blendBoneEulerDelta(idxRightUpLeg, 62f, 0f, 14f, w)
+        blendBoneEulerDelta(idxLeftLeg, -68f, 0f, 0f, w)
+        blendBoneEulerDelta(idxRightLeg, -68f, 0f, 0f, w)
+        blendBoneEulerDelta(idxLeftFoot, 10f, 0f, 0f, w)
+        blendBoneEulerDelta(idxRightFoot, 10f, 0f, 0f, w)
 
         if (idxLeftArm >= 0) {
-            quatFromAxisAngle(1f, 0f, 0f, armLowerDeg, qTmp1)
-            quatFromAxisAngle(0f, 1f, 0f, -leftArmSwing, qTmp2) // -localY = forward for LeftArm
+            quatFromAxisAngle(1f, 0f, 0f, 62f, qTmp1)
+            quatFromAxisAngle(0f, 1f, 0f, -54f, qTmp2)
             quatMul(qTmp2, qTmp1, qTmp3)
             quatMul(nodes[idxLeftArm].restR, qTmp3, qTarget)
-            quatSlerpInPlace(curR[idxLeftArm], qTarget, locoWeight)
+            quatSlerpInPlace(curR[idxLeftArm], qTarget, w)
         }
         if (idxRightArm >= 0) {
-            quatFromAxisAngle(1f, 0f, 0f, armLowerDeg, qTmp1)
-            quatFromAxisAngle(0f, 1f, 0f, rightArmSwing, qTmp2) // +localY = forward for RightArm
+            quatFromAxisAngle(1f, 0f, 0f, 62f, qTmp1)
+            quatFromAxisAngle(0f, 1f, 0f, 54f, qTmp2)
             quatMul(qTmp2, qTmp1, qTmp3)
             quatMul(nodes[idxRightArm].restR, qTmp3, qTarget)
-            quatSlerpInPlace(curR[idxRightArm], qTarget, locoWeight)
+            quatSlerpInPlace(curR[idxRightArm], qTarget, w)
         }
-
-        // Elbows (LeftForeArm: +localZ bends forward; RightForeArm: -localZ bends forward!)
-        val leftElbowDeg = (16f + sprintBlend * 44f + max(0f, -strideSin) * 18f) * walkOnlyWeight + 38f * airBlend + 24f * bikeBlend
-        val rightElbowDeg = (16f + sprintBlend * 44f + max(0f, strideSin) * 18f) * walkOnlyWeight + 38f * airBlend + 24f * bikeBlend
-        blendBoneEulerDelta(idxLeftForeArm, 0f, 0f, leftElbowDeg, locoWeight)
-        blendBoneEulerDelta(idxRightForeArm, 0f, 0f, -rightElbowDeg, locoWeight)
+        blendBoneEulerDelta(idxLeftForeArm, 0f, 0f, 24f, w)
+        blendBoneEulerDelta(idxRightForeArm, 0f, 0f, -24f, w)
     }
 
     private fun blendBoneEulerDelta(nodeIdx: Int, rxDeg: Float, ryDeg: Float, rzDeg: Float, weight: Float) {
@@ -256,14 +307,18 @@ class GlbSkinnedPlayer private constructor(
         ambientScale: Float,
         camX: Float, camY: Float, camZ: Float,
         fogR: Float, fogG: Float, fogB: Float,
-        fogStart: Float, fogEnd: Float
+        fogStart: Float, fogEnd: Float,
+        slopePitchDeg: Float = 0f,
+        slopeRollDeg: Float = 0f
     ) {
         val yawDeg = yawRad * 180f / PI.toFloat()
         Matrix.setIdentityM(modelMat, 0)
         // Clean ground lift (+0.068f at street level) keeps sneakers crisp on top of road/intersection quads!
-        val groundY = if (y < 0.07f) max(y + 0.008f, 0.068f) else y + 0.008f
+        val groundY = if (y < 0.07f && y > -0.10f) max(y + 0.008f, 0.068f) else y + 0.008f
         Matrix.translateM(modelMat, 0, x, groundY, z)
         Matrix.rotateM(modelMat, 0, yawDeg, 0f, 1f, 0f)
+        if (slopePitchDeg != 0f) Matrix.rotateM(modelMat, 0, slopePitchDeg, 1f, 0f, 0f)
+        if (slopeRollDeg != 0f) Matrix.rotateM(modelMat, 0, slopeRollDeg, 0f, 0f, 1f)
 
         GLES20.glUseProgram(shader.programId)
         GLES20.glUniformMatrix4fv(shader.uVpMatrixLoc, 1, false, dc.vpMatrix, 0)
@@ -331,14 +386,18 @@ class GlbSkinnedPlayer private constructor(
         y: Float,
         z: Float,
         yawRad: Float,
-        shadowAlpha: Float
+        shadowAlpha: Float,
+        slopePitchDeg: Float = 0f,
+        slopeRollDeg: Float = 0f
     ) {
         val yawDeg = yawRad * 180f / PI.toFloat()
         Matrix.setIdentityM(modelMat, 0)
         // Small ground lift matches street road height so shadow stays attached cleanly
-        val groundY = if (y < 0.07f) max(y + 0.008f, 0.068f) else y + 0.008f
+        val groundY = if (y < 0.07f && y > -0.10f) max(y + 0.008f, 0.068f) else y + 0.008f
         Matrix.translateM(modelMat, 0, x, groundY, z)
         Matrix.rotateM(modelMat, 0, yawDeg, 0f, 1f, 0f)
+        if (slopePitchDeg != 0f) Matrix.rotateM(modelMat, 0, slopePitchDeg, 1f, 0f, 0f)
+        if (slopeRollDeg != 0f) Matrix.rotateM(modelMat, 0, slopeRollDeg, 0f, 0f, 1f)
         Matrix.multiplyMM(shadowModelMat, 0, dc.shadowProjMatrix, 0, modelMat, 0)
 
         GLES20.glUseProgram(shader.programId)
@@ -510,9 +569,17 @@ class GlbSkinnedPlayer private constructor(
             } else {
                 val b0 = i0 * 3
                 val b1 = i1 * 3
-                curT[ni][0] = lerp(v[b0], v[b1], frac)
-                curT[ni][1] = lerp(v[b0 + 1], v[b1 + 1], frac)
-                curT[ni][2] = lerp(v[b0 + 2], v[b1 + 2], frac)
+                var tx = lerp(v[b0], v[b1], frac)
+                val ty = lerp(v[b0 + 1], v[b1 + 1], frac)
+                var tz = lerp(v[b0 + 2], v[b1 + 2], frac)
+                if (clip.stripRootXZ && ni == idxHips && v.size >= 3) {
+                    val rest = nodes[ni].restT
+                    tx = rest[0] + (tx - v[0]).coerceIn(-0.22f, 0.22f)
+                    tz = rest[2] + (tz - v[2]).coerceIn(-0.22f, 0.22f)
+                }
+                curT[ni][0] = tx
+                curT[ni][1] = ty
+                curT[ni][2] = tz
             }
         }
     }
@@ -538,7 +605,25 @@ class GlbSkinnedPlayer private constructor(
         private const val ALPHA_MASK = 1
         private const val ALPHA_BLEND = 2
 
+        private val EXTRA_CLIP_SPECS = listOf(
+            Triple(PlayerAnimClip.RUN, "animations/playerrun.sanim", false),
+            Triple(PlayerAnimClip.FLIP, "animations/playerflip.sanim", false),
+            Triple(PlayerAnimClip.HAND_FIGHT, "animations/playerhandfight.sanim", false),
+            Triple(PlayerAnimClip.LEG_FIGHT, "animations/plauerlegfight.sanim", false),
+            Triple(PlayerAnimClip.RELEASE, "animations/playerrelease.sanim", true)
+        )
+
+        val extraClipCount: Int get() = EXTRA_CLIP_SPECS.size
+
         fun loadFromAssets(context: Context, assetPath: String, fallbackWhiteTex: Int): GlbSkinnedPlayer? {
+            val player = loadBaseFromAssets(context, assetPath, fallbackWhiteTex) ?: return null
+            for (i in EXTRA_CLIP_SPECS.indices) {
+                player.loadExtraClipStep(context, i)
+            }
+            return player
+        }
+
+        fun loadBaseFromAssets(context: Context, assetPath: String, fallbackWhiteTex: Int): GlbSkinnedPlayer? {
             return runCatching {
                 val bytes = context.assets.open(assetPath).use { it.readBytes() }
                 val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
@@ -727,8 +812,8 @@ class GlbSkinnedPlayer private constructor(
                 GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
                 GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
 
-                // 5. Parse Embedded Animation 0 (`gesture_1`)
-                var clip: GlbAnimClip? = null
+                // 5. Parse Embedded STAND Animation 0 + Load All 5 Companion .sanim Clips!
+                val clipMap = HashMap<PlayerAnimClip, GlbAnimClip>(6)
                 if (animsArr.length() > 0) {
                     val animObj = animsArr.getJSONObject(0)
                     val chArr = animObj.getJSONArray("channels")
@@ -749,7 +834,7 @@ class GlbSkinnedPlayer private constructor(
                         if (times.isNotEmpty() && times.last() > maxDur) maxDur = times.last()
                         channels.add(GlbAnimChannel(nodeIdx, path == "rotation", times, values))
                     }
-                    clip = GlbAnimClip(maxDur, channels)
+                    clipMap[PlayerAnimClip.STAND] = GlbAnimClip(maxDur, channels, stripRootXZ = false)
                 }
 
                 val shader = SkinnedMeshShader()
@@ -757,14 +842,70 @@ class GlbSkinnedPlayer private constructor(
                     Log.e(TAG, "SkinnedMeshShader failed to link — falling back to default character")
                     return null
                 }
-                GlbSkinnedPlayer(shader, nodes, rootNodeIndices, jointNodeIndices, inverseBindMatrices, subMeshes, clip)
+                Log.i(TAG, "Loaded base $assetPath (embedded clips: ${clipMap.keys})")
+                GlbSkinnedPlayer(shader, nodes, rootNodeIndices, jointNodeIndices, inverseBindMatrices, subMeshes, clipMap)
             }.onFailure { e ->
                 Log.e(TAG, "Failed to load $assetPath: ${e.message}", e)
             }.getOrNull()
         }
 
+        private fun loadSanimClip(
+            context: Context,
+            assetPath: String,
+            nodeByName: Map<String, Int>,
+            stripRootXZ: Boolean
+        ): GlbAnimClip? {
+            return runCatching {
+                val raw = context.assets.open(assetPath).use { it.readBytes() }
+                val bb = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN)
+                val b0 = bb.get().toInt().toChar()
+                val b1 = bb.get().toInt().toChar()
+                val b2 = bb.get().toInt().toChar()
+                val b3 = bb.get().toInt().toChar()
+                if (b0 != 'S' || b1 != 'A' || b2 != 'N' || b3 != 'M') return null
+                bb.int // version
+                val duration = bb.float
+                val channelCount = bb.int
+                val channels = ArrayList<GlbAnimChannel>(channelCount)
+                for (c in 0 until channelCount) {
+                    val nameLen = bb.short.toInt() and 0xFFFF
+                    val nameBytes = ByteArray(nameLen)
+                    bb.get(nameBytes)
+                    val nodeName = String(nameBytes, Charsets.UTF_8)
+                    val isRotation = bb.get().toInt() != 0
+                    val keyCount = bb.int
+                    val times = FloatArray(keyCount) { bb.float }
+                    val comps = if (isRotation) 4 else 3
+                    val values = FloatArray(keyCount * comps) { bb.float }
+                    val nodeIdx = nodeByName[nodeName] ?: -1
+                    if (nodeIdx >= 0 && keyCount > 0) {
+                        channels.add(GlbAnimChannel(nodeIdx, isRotation, times, values))
+                    }
+                }
+                GlbAnimClip(duration, channels, stripRootXZ)
+            }.onFailure { e ->
+                Log.e(TAG, "Failed to load $assetPath: ${e.message}")
+            }.getOrNull()
+        }
+
         private fun uploadEmbeddedImage(bytes: ByteArray, offset: Int, length: Int): Int {
-            val opts = BitmapFactory.Options().apply { inScaled = false }
+            val bounds = BitmapFactory.Options().apply {
+                inScaled = false
+                inJustDecodeBounds = true
+            }
+            BitmapFactory.decodeByteArray(bytes, offset, length, bounds)
+            var sample = 1
+            var w = bounds.outWidth
+            var h = bounds.outHeight
+            while (w > 512 || h > 512) {
+                sample *= 2
+                w /= 2
+                h /= 2
+            }
+            val opts = BitmapFactory.Options().apply {
+                inScaled = false
+                inSampleSize = sample
+            }
             val bmp = BitmapFactory.decodeByteArray(bytes, offset, length, opts) ?: return 0
             val ids = IntArray(1)
             GLES20.glGenTextures(1, ids, 0)
@@ -961,7 +1102,8 @@ class GlbSkinnedPlayer private constructor(
 
     private class GlbAnimClip(
         val duration: Float,
-        val channels: List<GlbAnimChannel>
+        val channels: List<GlbAnimChannel>,
+        val stripRootXZ: Boolean = false
     )
 
     /**

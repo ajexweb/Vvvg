@@ -12,17 +12,21 @@ import com.example.game.model.AppScreen
 import com.example.game.model.CarCrashType
 import com.example.game.model.CharacterSkin
 import com.example.game.model.ControlLayout
-import com.example.game.model.DailyMission
+import com.example.game.model.CustomHudLayout
+import com.example.game.model.DensityLevel
 import com.example.game.model.GameSettings
 import com.example.game.model.GameSkins
 import com.example.game.model.GameStoreCatalog
 import com.example.game.model.GameTelemetry
 import com.example.game.model.GraphicsQuality
 import com.example.game.model.GroundSurface
+import com.example.game.model.HudElementId
 import com.example.game.model.LobbyModal
-import com.example.game.model.MissionMetric
 import com.example.game.model.PlayerProfileStats
+import com.example.game.model.RenderResolution
+import com.example.game.model.SpawnDistricts
 import com.example.game.model.StoreItem
+import com.example.game.model.VehicleControlMode
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,17 +37,20 @@ import kotlinx.coroutines.launch
 data class GameUiState(
     val currentScreen: AppScreen = AppScreen.SPLASH,
     val activeModal: LobbyModal = LobbyModal.NONE,
+    val isPreferencesLoaded: Boolean = false,
+    val isCustomHudEditorOpen: Boolean = false,
     val splashProgress: Float = 0f,
-    val splashStatus: String = "Loading Saini City Assets...",
+    val splashStatus: String = "Loading Saini State Assets...",
     val selectedSkin: CharacterSkin = GameSkins.all.first(),
     val settings: GameSettings = GameSettings(),
     val profileStats: PlayerProfileStats = PlayerProfileStats(),
     val ownedItemIds: Set<String> = GameStoreCatalog.defaultOwnedIds,
-    val claimedMissionIds: Set<String> = emptySet(),
-    val equippedGearIds: Set<String> = emptySet(),
     val lobbyToast: String? = null,
     val telemetry: GameTelemetry = GameTelemetry(),
     val isPaused: Boolean = false,
+    val isMatchLoading: Boolean = false,
+    val matchLoadProgress: Float = 0f,
+    val matchLoadStatus: String = "Initializing Saini State...",
     val bannerMessage: String? = null,
     val waypointX: Float? = null,
     val waypointZ: Float? = null
@@ -60,23 +67,28 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
 
     private var lastSavedSessionScore = 0
     private var lastSavedDistance = 0f
+    @Volatile private var worldEngineReady = false
+    @Volatile private var latestEngineProgress = 0f
+    @Volatile private var latestEngineStageLabel: String? = null
+    private var matchLoadJob: kotlinx.coroutines.Job? = null
 
     init {
         viewModelScope.launch {
+            repo.ensureFreshProfileDefaults()
             repo.gameDataFlow.collect { saved ->
                 audio.applyAudioSettings(
                     musicVol = saved.settings.musicVolume,
                     sfxVol = saved.settings.sfxVolume,
-                    muted = saved.settings.isMuted
+                    muted = saved.settings.isMuted,
+                    ambientEnabled = saved.settings.ambientAudioEnabled
                 )
                 _uiState.update { state ->
                     state.copy(
+                        isPreferencesLoaded = true,
                         selectedSkin = GameSkins.byId(saved.selectedSkinId),
                         settings = saved.settings,
                         profileStats = saved.stats,
-                        ownedItemIds = saved.ownedItemIds,
-                        claimedMissionIds = saved.claimedMissionIds,
-                        equippedGearIds = saved.equippedGearIds
+                        ownedItemIds = saved.ownedItemIds
                     )
                 }
             }
@@ -87,16 +99,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
     private fun runSplashSequence() {
         viewModelScope.launch {
             val stages = listOf(
-                0.22f to "Loading Saini City Textures & Props...",
-                0.48f to "Initializing 3D Character Rig & Vehicles...",
-                0.76f to "Preparing Open-World Districts & Airport...",
+                0.24f to "Loading Saini State Textures & Props...",
+                0.52f to "Initializing 3D Character Rig & Vehicles...",
+                0.80f to "Preparing 4.8km Open-World Biomes...",
                 1.00f to "Ready to Deploy"
             )
             for ((target, label) in stages) {
-                delay(240L)
+                delay(220L)
                 _uiState.update { it.copy(splashProgress = target, splashStatus = label) }
             }
-            delay(260L)
+            delay(220L)
             _uiState.update { it.copy(currentScreen = AppScreen.LOBBY) }
             audio.startLobbyMusic()
         }
@@ -116,21 +128,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
         audio.playSkinEquip()
         _uiState.update { it.copy(selectedSkin = skin) }
         viewModelScope.launch { repo.saveSelectedSkin(skin.id) }
-        showLobbyToast("Equipped ${skin.name}")
     }
 
     fun purchaseOrEquipStoreItem(item: StoreItem) {
         val state = _uiState.value
         val owned = item.id in state.ownedItemIds
         if (owned) {
-            if (item.linkedSkinId != null) {
-                selectSkin(GameSkins.byId(item.linkedSkinId))
-            } else {
-                audio.playClick()
-                viewModelScope.launch { repo.toggleEquippedGear(item.id) }
-                val isCurrentlyEquipped = item.id in state.equippedGearIds
-                showLobbyToast(if (isCurrentlyEquipped) "Unequipped ${item.name}" else "Equipped ${item.name}")
+            audio.playSkinEquip()
+            updateSettings { s ->
+                s.copy(
+                    selectedVehicleWrapId = item.linkedWrapId ?: s.selectedVehicleWrapId,
+                    selectedEmoteId = item.linkedEmoteId ?: s.selectedEmoteId
+                )
             }
+            showLobbyToast("Equipped ${item.name}")
             return
         }
 
@@ -138,7 +149,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
         if (stats.coins < item.priceCoins || stats.diamonds < item.priceDiamonds) {
             audio.playClick()
             val needed = if (item.priceDiamonds > 0) "${item.priceDiamonds} Diamonds" else "${item.priceCoins} Coins"
-            showLobbyToast("Not enough currency! Need $needed.")
+            showLobbyToast("Need $needed — explore zones & collect coins!")
             return
         }
 
@@ -147,43 +158,50 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
                 itemId = item.id,
                 costCoins = item.priceCoins,
                 costDiamonds = item.priceDiamonds,
-                linkedSkinId = item.linkedSkinId
+                linkedWrapId = item.linkedWrapId,
+                linkedEmoteId = item.linkedEmoteId
             )
             if (bought) {
                 audio.playPickup()
-                showLobbyToast("Purchased & Equipped ${item.name}!")
+                showLobbyToast("Unlocked & Equipped ${item.name}!")
             }
         }
     }
 
-    fun claimMissionReward(mission: DailyMission) {
-        val state = _uiState.value
-        if (mission.id in state.claimedMissionIds) return
-        val progress = missionProgressValue(mission, state.profileStats)
-        if (progress < mission.targetValue) {
-            audio.playClick()
-            showLobbyToast("Complete this mission in Saini City first!")
-            return
+    fun savePlayerProfile(name: String, avatarId: String) {
+        val clean = name.trim().take(16)
+        if (clean.length < 2) return
+        audio.playClick()
+        _uiState.update { state ->
+            state.copy(
+                profileStats = state.profileStats.copy(
+                    playerName = clean,
+                    hasSetUsername = true,
+                    selectedAvatarId = avatarId
+                )
+            )
         }
         viewModelScope.launch {
-            repo.claimMission(mission.id, mission.rewardCoins, mission.rewardDiamonds)
-            audio.playZoneDiscovered()
-            showLobbyToast("Claimed +${mission.rewardCoins} Coins & +${mission.rewardDiamonds} Diamonds!")
+            repo.savePlayerProfile(clean, avatarId)
         }
+        showLobbyToast("Profile updated: $clean")
     }
 
-    fun missionProgressValue(mission: DailyMission, stats: PlayerProfileStats): Int {
-        return when (mission.metric) {
-            MissionMetric.ZONES -> stats.zonesDiscoveredTotal
-            MissionMetric.DISTANCE -> stats.distanceMeters
-            MissionMetric.SCORE -> stats.totalScore
-        }
+    fun openCustomHudEditor() {
+        audio.playClick()
+        _uiState.update { it.copy(isCustomHudEditorOpen = true) }
     }
 
-    fun hasClaimableMissions(state: GameUiState): Boolean {
-        return com.example.game.model.GameMissions.all.any { m ->
-            m.id !in state.claimedMissionIds && missionProgressValue(m, state.profileStats) >= m.targetValue
-        }
+    fun closeCustomHudEditor() {
+        audio.playClick()
+        _uiState.update { it.copy(isCustomHudEditorOpen = false) }
+    }
+
+    fun saveCustomHudLayout(layout: CustomHudLayout) {
+        audio.playClick()
+        updateSettings { it.copy(customHudLayout = layout) }
+        _uiState.update { it.copy(isCustomHudEditorOpen = false) }
+        showLobbyToast("Custom HUD Layout Saved!")
     }
 
     private fun showLobbyToast(message: String) {
@@ -199,7 +217,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
         audio.applyAudioSettings(
             musicVol = updated.musicVolume,
             sfxVol = updated.sfxVolume,
-            muted = updated.isMuted
+            muted = updated.isMuted,
+            ambientEnabled = updated.ambientAudioEnabled
         )
         _uiState.update { it.copy(settings = updated) }
         viewModelScope.launch { repo.saveSettings(updated) }
@@ -213,12 +232,42 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
 
     fun setGraphicsQuality(quality: GraphicsQuality) {
         audio.playClick()
-        updateSettings { it.copy(graphicsQuality = quality) }
+        // Smart preset sync: auto-tunes shadows/grass/resolution for genuine instant FPS improvement!
+        updateSettings { cur ->
+            when (quality) {
+                GraphicsQuality.LOW -> cur.copy(
+                    graphicsQuality = quality,
+                    renderResolution = RenderResolution.PERFORMANCE_75,
+                    shadowsEnabled = false,
+                    grassDensity = DensityLevel.LOW,
+                    streamingRadiusMeters = 36f
+                )
+                GraphicsQuality.MEDIUM -> cur.copy(
+                    graphicsQuality = quality,
+                    renderResolution = RenderResolution.BALANCED_85,
+                    shadowsEnabled = false,
+                    grassDensity = DensityLevel.MEDIUM,
+                    streamingRadiusMeters = 52f
+                )
+                GraphicsQuality.HIGH -> cur.copy(
+                    graphicsQuality = quality,
+                    renderResolution = RenderResolution.NATIVE_100,
+                    shadowsEnabled = true,
+                    grassDensity = DensityLevel.HIGH,
+                    streamingRadiusMeters = 72f
+                )
+            }
+        }
     }
 
     fun setControlLayout(layout: ControlLayout) {
         audio.playClick()
         updateSettings { it.copy(controlLayout = layout) }
+    }
+
+    fun setVehicleControlMode(mode: VehicleControlMode) {
+        audio.playClick()
+        updateSettings { it.copy(vehicleControlMode = mode) }
     }
 
     fun setTargetFps(fps: Int) {
@@ -231,21 +280,102 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
         updateSettings { it.copy(streamingRadiusMeters = meters) }
     }
 
+    fun toggleFpsCounter(show: Boolean) {
+        audio.playClick()
+        updateSettings { cur ->
+            val fpsCfg = cur.customHudLayout.configFor(HudElementId.FPS_COUNTER)
+            cur.copy(customHudLayout = cur.customHudLayout.updated(HudElementId.FPS_COUNTER, fpsCfg.copy(visible = show)))
+        }
+    }
+
+    fun cycleSpawnDistrict(delta: Int) {
+        audio.playClick()
+        val all = SpawnDistricts.all
+        val curIdx = all.indexOfFirst { it.id == _uiState.value.settings.selectedSpawnId }.coerceAtLeast(0)
+        val next = all[(curIdx + delta + all.size) % all.size]
+        updateSettings { it.copy(selectedSpawnId = next.id) }
+    }
+
     fun startGame() {
         audio.playGameStartDeploy()
-        audio.startGameplayAudio()
+        audio.stopLobbyMusic()
         lastSavedSessionScore = 0
         lastSavedDistance = 0f
+        worldEngineReady = false
+        latestEngineProgress = 0f
+        latestEngineStageLabel = null
+        inputState.resetAll()
+        val spawn = SpawnDistricts.byId(_uiState.value.settings.selectedSpawnId)
         _uiState.update {
             it.copy(
                 currentScreen = AppScreen.GAMEPLAY,
                 activeModal = LobbyModal.NONE,
                 isPaused = false,
-                telemetry = GameTelemetry(),
-                bannerMessage = "Welcome to Saini City"
+                isMatchLoading = true,
+                matchLoadProgress = 0.02f,
+                matchLoadStatus = "Deploying to ${spawn.name}...",
+                telemetry = GameTelemetry(playerX = spawn.x, playerZ = spawn.z),
+                bannerMessage = null
             )
         }
-        clearBannerSoon()
+        runMatchLoadingSequence(spawn.name)
+    }
+
+    private fun runMatchLoadingSequence(spawnName: String) {
+        matchLoadJob?.cancel()
+        matchLoadJob = viewModelScope.launch {
+            val minDurationMs = 2200L
+            val safetyTimeoutMs = 45000L
+            val startMs = System.currentTimeMillis()
+            var smoothedProgress = 0.02f
+            while (true) {
+                val elapsed = System.currentTimeMillis() - startMs
+                val timeFrac = (elapsed.toFloat() / minDurationMs.toFloat()).coerceIn(0f, 1f)
+                val engineFrac = latestEngineProgress.coerceIn(0f, 1f)
+
+                val targetProgress = if (worldEngineReady) {
+                    maxOf(timeFrac, 0.98f)
+                } else {
+                    maxOf(engineFrac * 0.96f, minOf(timeFrac * 0.14f, 0.14f)).coerceAtMost(0.96f)
+                }
+                smoothedProgress = (smoothedProgress + (targetProgress - smoothedProgress) * 0.24f)
+                    .coerceIn(smoothedProgress, if (worldEngineReady) 1.0f else 0.96f)
+
+                val fallbackLabel = when {
+                    smoothedProgress < 0.25f -> "Initializing 3D World Engine..."
+                    smoothedProgress < 0.50f -> "Streaming City & Vehicle Assets..."
+                    smoothedProgress < 0.72f -> "Loading Character Animations & Map..."
+                    smoothedProgress < 0.95f -> "Pre-baking 3D Terrain & Foliage..."
+                    else -> if (worldEngineReady) "Entering $spawnName..." else "Warming Up Smooth GPU Pipeline..."
+                }
+                val label = latestEngineStageLabel ?: fallbackLabel
+                _uiState.update {
+                    it.copy(
+                        matchLoadProgress = smoothedProgress,
+                        matchLoadStatus = label
+                    )
+                }
+                if (elapsed >= minDurationMs && (worldEngineReady || elapsed >= safetyTimeoutMs)) {
+                    break
+                }
+                delay(36L)
+            }
+            _uiState.update {
+                it.copy(
+                    matchLoadProgress = 1.0f,
+                    matchLoadStatus = "Entering $spawnName..."
+                )
+            }
+            delay(140L)
+            audio.startGameplayAudio()
+            _uiState.update {
+                it.copy(
+                    isMatchLoading = false,
+                    bannerMessage = "Deployed: $spawnName"
+                )
+            }
+            clearBannerSoon()
+        }
     }
 
     fun togglePause() {
@@ -261,11 +391,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
         lastSavedSessionScore = 0
         lastSavedDistance = 0f
         resetEngine()
+        val spawn = SpawnDistricts.byId(_uiState.value.settings.selectedSpawnId)
         _uiState.update {
             it.copy(
                 isPaused = false,
-                telemetry = GameTelemetry(),
-                bannerMessage = "Restarted at Saini Central Chauraha"
+                telemetry = GameTelemetry(playerX = spawn.x, playerZ = spawn.z),
+                bannerMessage = "Respawned at ${spawn.name}"
             )
         }
         clearBannerSoon()
@@ -273,14 +404,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
 
     fun returnToLobby() {
         audio.playClick()
+        matchLoadJob?.cancel()
         commitPendingStats()
-        inputState.moveX = 0f
-        inputState.moveY = 0f
-        inputState.isSprinting = false
+        inputState.resetAll()
         _uiState.update {
             it.copy(
                 currentScreen = AppScreen.LOBBY,
                 isPaused = false,
+                isMatchLoading = false,
                 activeModal = LobbyModal.NONE,
                 bannerMessage = null,
                 waypointX = null,
@@ -349,6 +480,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
 
     // --- GameEngineListener callbacks (from GL thread) ---
 
+    override fun onWorldLoadProgress(progress: Float, stageLabel: String) {
+        latestEngineProgress = progress.coerceIn(0f, 1f)
+        latestEngineStageLabel = stageLabel
+    }
+
+    override fun onWorldReady() {
+        latestEngineProgress = 1f
+        worldEngineReady = true
+    }
+
     override fun onTelemetryUpdate(telemetry: GameTelemetry) {
         _uiState.update { it.copy(telemetry = telemetry) }
     }
@@ -367,6 +508,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
 
     override fun onPlayerWallVault() {
         audio.playWallVault()
+    }
+
+    override fun onCombatAction(isKick: Boolean) {
+        if (isKick) audio.playWallVault() else audio.playJump()
     }
 
     override fun onDoorToggled(buildingName: String, opening: Boolean) {
@@ -418,7 +563,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
 
     override fun onNpcGreeting(npcName: String) {
         audio.playClick()
-        showBanner("$npcName: \"Welcome to Saini City!\"")
+        showBanner("$npcName: \"Welcome to Saini State!\"")
     }
 
     override fun onAmbientAudioUpdate(
@@ -447,7 +592,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), G
 
     override fun onOrbCollected(orbId: Int, newScore: Int) {
         audio.playPickup()
-        showBanner("Gold Coin Collected +100 PTS")
+        showBanner("Coin Collected +100 PTS")
     }
 
     override fun onZoneDiscovered(zoneId: String, zoneName: String, bonusPoints: Int) {

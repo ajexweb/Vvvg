@@ -5,9 +5,9 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 
 private val SainiDarkColorScheme = darkColorScheme(
-    primary = SunsetGold,
-    onPrimary = CityObsidian,
-    secondary = ElectricCyan,
+    primary = TacticalAccent,
+    onPrimary = TextPrimary,
+    secondary = TacticalCyan,
     onSecondary = CityObsidian,
     tertiary = EmeraldPulse,
     background = CityObsidian,

@@ -21,10 +21,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.game.model.AppScreen
 import com.example.game.model.LobbyModal
 import com.example.game.viewmodel.GameViewModel
+import com.example.ui.components.UsernameOnboardingOverlay
 import com.example.ui.screens.CreditsModal
+import com.example.ui.screens.CustomHudEditorOverlay
 import com.example.ui.screens.GameplayScreen
 import com.example.ui.screens.LobbyScreen
-import com.example.ui.screens.MissionsModal
 import com.example.ui.screens.ProfileModal
 import com.example.ui.screens.SettingsModal
 import com.example.ui.screens.SplashScreen
@@ -68,11 +69,18 @@ class MainActivity : ComponentActivity() {
                             AppScreen.LOBBY -> {
                                 LobbyScreen(
                                     uiState = uiState,
-                                    hasClaimableMissions = viewModel.hasClaimableMissions(uiState),
                                     onStartGame = viewModel::startGame,
                                     onToggleMute = viewModel::toggleMute,
                                     onOpenModal = viewModel::openModal,
                                     onCloseModal = viewModel::closeModal,
+                                    onOpenCustomHud = viewModel::openCustomHudEditor,
+                                    onCycleSpawnDistrict = viewModel::cycleSpawnDistrict,
+                                    onToggleStartNight = {
+                                        viewModel.updateSettings { it.copy(startNightMode = !it.startNightMode) }
+                                    },
+                                    onToggleStartRain = {
+                                        viewModel.updateSettings { it.copy(startRainMode = !it.startRainMode) }
+                                    },
                                     onSelectSkin = viewModel::selectSkin
                                 )
                             }
@@ -84,6 +92,8 @@ class MainActivity : ComponentActivity() {
                                     engineListener = viewModel,
                                     onTogglePause = viewModel::togglePause,
                                     onToggleMute = viewModel::toggleMute,
+                                    onOpenCustomHud = viewModel::openCustomHudEditor,
+                                    onSetVehicleControlMode = viewModel::setVehicleControlMode,
                                     onRestart = viewModel::restartSession,
                                     onReturnToLobby = viewModel::returnToLobby,
                                     onSetWaypoint = viewModel::setMapWaypoint,
@@ -93,8 +103,8 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Official Game Lobby Modals (CHARACTERS is integrated seamlessly inside LobbyScreen over the live 3D model)
-                    if (uiState.currentScreen == AppScreen.LOBBY) {
+                    // Official Game Lobby Modals
+                    if (uiState.currentScreen == AppScreen.LOBBY && !uiState.isCustomHudEditorOpen) {
                         when (uiState.activeModal) {
                             LobbyModal.NONE, LobbyModal.CHARACTERS -> Unit
                             LobbyModal.STORE -> StoreModal(
@@ -102,15 +112,10 @@ class MainActivity : ComponentActivity() {
                                 onPurchaseOrEquip = viewModel::purchaseOrEquipStoreItem,
                                 onDismiss = viewModel::closeModal
                             )
-                            LobbyModal.MISSIONS -> MissionsModal(
-                                uiState = uiState,
-                                progressProvider = { m -> viewModel.missionProgressValue(m, uiState.profileStats) },
-                                onClaimMission = viewModel::claimMissionReward,
-                                onDismiss = viewModel::closeModal
-                            )
                             LobbyModal.PROFILE -> ProfileModal(
                                 stats = uiState.profileStats,
                                 activeSkin = uiState.selectedSkin,
+                                onSaveProfile = viewModel::savePlayerProfile,
                                 onDismiss = viewModel::closeModal
                             )
                             LobbyModal.SETTINGS -> SettingsModal(
@@ -119,14 +124,37 @@ class MainActivity : ComponentActivity() {
                                 onUpdateSettings = viewModel::updateSettings,
                                 onSetGraphics = viewModel::setGraphicsQuality,
                                 onSetControlLayout = viewModel::setControlLayout,
+                                onSetVehicleControlMode = viewModel::setVehicleControlMode,
                                 onSetTargetFps = viewModel::setTargetFps,
                                 onSetStreamingRadius = viewModel::setStreamingRadius,
+                                onToggleFpsCounter = viewModel::toggleFpsCounter,
+                                onOpenCustomHud = viewModel::openCustomHudEditor,
                                 onDismiss = viewModel::closeModal
                             )
                             LobbyModal.CREDITS -> CreditsModal(
                                 onDismiss = viewModel::closeModal
                             )
                         }
+                    }
+
+                    // First-Time Launch Username & Tactical Avatar Onboarding Prompt
+                    if (uiState.currentScreen == AppScreen.LOBBY &&
+                        uiState.isPreferencesLoaded &&
+                        !uiState.profileStats.hasSetUsername
+                    ) {
+                        UsernameOnboardingOverlay(
+                            initialAvatarId = uiState.profileStats.selectedAvatarId,
+                            onComplete = viewModel::savePlayerProfile
+                        )
+                    }
+
+                    // Full-Screen Drag-and-Drop Custom HUD Editor (accessible from Settings & Pause Menu)
+                    if (uiState.isCustomHudEditorOpen) {
+                        CustomHudEditorOverlay(
+                            initialLayout = uiState.settings.customHudLayout,
+                            onSave = viewModel::saveCustomHudLayout,
+                            onCancel = viewModel::closeCustomHudEditor
+                        )
                     }
                 }
             }

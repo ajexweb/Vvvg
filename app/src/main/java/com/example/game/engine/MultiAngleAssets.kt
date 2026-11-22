@@ -7,12 +7,16 @@ import kotlin.math.abs
 
 /**
  * Central Texture Manager for the complete 80-file Saini Simulator realistic multi-angle pack
- * stored in assets/textures_v2/. Every texture is decoded & uploaded ONCE with mipmaps and
- * hardware anisotropic filtering, then cached for zero-allocation rendering.
+ * stored in assets/textures_v2/. Supports incremental per-frame batch decoding via [stepLoadBatch]
+ * so the loading screen stays responsive with zero startup freeze!
  */
-class MultiAngleTextureManager(private val context: Context) {
+class MultiAngleTextureManager(
+    private val context: Context,
+    fallbackTex: Int = 0
+) {
 
     private val cache = HashMap<String, Int>(96)
+    private var nextLoadIdx = 0
 
     private fun load(name: String, repeatX: Boolean = false, repeatY: Boolean = repeatX): Int {
         val key = "$name:$repeatX:$repeatY"
@@ -21,121 +25,224 @@ class MultiAngleTextureManager(private val context: Context) {
             context = context,
             assetPath = "textures_v2/$name.webp",
             repeat = repeatX,
-            repeatY = repeatY
+            repeatY = repeatY,
+            maxDim = 512
         )
         cache[key] = texId
         return texId
     }
 
     // --- 1. AC Outdoor Unit (6) ---
-    val acFront = load("ac_outdoor_unit_01_front_fan_grill_badge")
-    val acBack = load("ac_outdoor_unit_02_back_radiator_fins")
-    val acRight = load("ac_outdoor_unit_03_right_side_copper_pipes_valves")
-    val acLeft = load("ac_outdoor_unit_04_left_side_intake_vents")
-    val acTop = load("ac_outdoor_unit_05_top_metal_lid")
-    val acBottom = load("ac_outdoor_unit_06_bottom_base_drain_feet")
+    var acFront = fallbackTex
+    var acBack = fallbackTex
+    var acRight = fallbackTex
+    var acLeft = fallbackTex
+    var acTop = fallbackTex
+    var acBottom = fallbackTex
 
     // --- 2. Rooftop Water Tank (3) ---
-    val waterTankSide = load("rooftop_water_tank_01_side_cylindrical_ribbed_black", repeatX = true, repeatY = false)
-    val waterTankTop = load("rooftop_water_tank_02_top_lid_and_rings")
-    val waterTankBottom = load("rooftop_water_tank_03_bottom_base")
+    var waterTankSide = fallbackTex
+    var waterTankTop = fallbackTex
+    var waterTankBottom = fallbackTex
 
     // --- 3. King Size Bed (6) ---
-    val bedTop = load("house_king_bed_01_top_mattress_duvet_pillows")
-    val bedFront = load("house_king_bed_02_front_footboard_wood_and_sheets")
-    val bedBack = load("house_king_bed_03_back_headboard_tufted_wood")
-    val bedLeft = load("house_king_bed_04_left_side_profile_bedding")
-    val bedRight = load("house_king_bed_05_right_side_profile_bedding")
-    val bedBottom = load("house_king_bed_06_bottom_wooden_slats_frame")
+    var bedTop = fallbackTex
+    var bedFront = fallbackTex
+    var bedBack = fallbackTex
+    var bedLeft = fallbackTex
+    var bedRight = fallbackTex
+    var bedBottom = fallbackTex
 
     // --- 4. Modern Sofa (6) ---
-    val sofaFront = load("house_modern_sofa_01_front_cushions_armrests")
-    val sofaBack = load("house_modern_sofa_02_back_upholstered_fabric")
-    val sofaLeft = load("house_modern_sofa_03_left_side_armrest")
-    val sofaRight = load("house_modern_sofa_04_right_side_armrest")
-    val sofaTop = load("house_modern_sofa_05_top_seats_and_backrest")
-    val sofaBottom = load("house_modern_sofa_06_bottom_dust_cover_feet")
+    var sofaFront = fallbackTex
+    var sofaBack = fallbackTex
+    var sofaLeft = fallbackTex
+    var sofaRight = fallbackTex
+    var sofaTop = fallbackTex
+    var sofaBottom = fallbackTex
 
     // --- 5. Wooden Wardrobe (6) ---
-    val wardrobeFront = load("house_wooden_wardrobe_01_front_double_doors_handles")
-    val wardrobeLeft = load("house_wooden_wardrobe_02_left_side_wood_panel")
-    val wardrobeRight = load("house_wooden_wardrobe_03_right_side_wood_panel")
-    val wardrobeBack = load("house_wooden_wardrobe_04_back_plywood_panel")
-    val wardrobeTop = load("house_wooden_wardrobe_05_top_wood_surface")
-    val wardrobeBottom = load("house_wooden_wardrobe_06_bottom_base_wood")
+    var wardrobeFront = fallbackTex
+    var wardrobeLeft = fallbackTex
+    var wardrobeRight = fallbackTex
+    var wardrobeBack = fallbackTex
+    var wardrobeTop = fallbackTex
+    var wardrobeBottom = fallbackTex
 
     // --- 6. Double-Door Refrigerator (6) ---
-    val fridgeFront = load("house_refrigerator_01_front_stainless_steel_doors_dispenser")
-    val fridgeLeft = load("house_refrigerator_02_left_side_textured_metal")
-    val fridgeRight = load("house_refrigerator_03_right_side_textured_metal")
-    val fridgeBack = load("house_refrigerator_04_back_compressor_coils")
-    val fridgeTop = load("house_refrigerator_05_top_metal_hinge_covers")
-    val fridgeBottom = load("house_refrigerator_06_bottom_base_leveling_feet")
+    var fridgeFront = fallbackTex
+    var fridgeLeft = fallbackTex
+    var fridgeRight = fallbackTex
+    var fridgeBack = fallbackTex
+    var fridgeTop = fallbackTex
+    var fridgeBottom = fallbackTex
 
     // --- 7. TV Unit & LED TV (6) ---
-    val tvFront = load("house_tv_unit_01_front_led_tv_and_cabinet")
-    val tvBack = load("house_tv_unit_02_back_vents_and_ports")
-    val tvLeft = load("house_tv_unit_03_left_side_wood_profile")
-    val tvRight = load("house_tv_unit_04_right_side_wood_profile")
-    val tvTop = load("house_tv_unit_05_top_wood_surface")
-    val tvBottom = load("house_tv_unit_06_bottom_cabinet_underside")
+    var tvFront = fallbackTex
+    var tvBack = fallbackTex
+    var tvLeft = fallbackTex
+    var tvRight = fallbackTex
+    var tvTop = fallbackTex
+    var tvBottom = fallbackTex
 
     // --- 8. Modular Kitchen Counter (6) ---
-    val kitchenFront = load("house_kitchen_counter_01_front_drawers_handles")
-    val kitchenTop = load("house_kitchen_counter_02_top_granite_sink_stove")
-    val kitchenLeft = load("house_kitchen_counter_03_left_side_panel")
-    val kitchenRight = load("house_kitchen_counter_04_right_side_panel")
-    val kitchenBackBacksplash = load("house_kitchen_counter_05_back_tiles_backsplash", repeatX = true, repeatY = false)
-    val kitchenBottom = load("house_kitchen_counter_06_bottom_base_plinth")
+    var kitchenFront = fallbackTex
+    var kitchenTop = fallbackTex
+    var kitchenLeft = fallbackTex
+    var kitchenRight = fallbackTex
+    var kitchenBackBacksplash = fallbackTex
+    var kitchenBottom = fallbackTex
 
     // --- 9. Office Desk & PC (4) ---
-    val deskFront = load("office_desk_pc_01_front_drawers_and_screen")
-    val deskTop = load("office_desk_pc_02_top_wood_keyboard_mousepad")
-    val deskBack = load("office_desk_pc_03_back_modesty_panel")
-    val deskSide = load("office_desk_pc_04_side_steel_and_wood")
+    var deskFront = fallbackTex
+    var deskTop = fallbackTex
+    var deskBack = fallbackTex
+    var deskSide = fallbackTex
 
     // --- 10. Factory CNC Machine (5) ---
-    val cncFront = load("factory_cnc_machine_01_front_door_control_screen")
-    val cncLeft = load("factory_cnc_machine_02_left_side_vents_warning")
-    val cncRight = load("factory_cnc_machine_03_right_side_vents_warning")
-    val cncBack = load("factory_cnc_machine_04_back_cables_fan")
-    val cncTop = load("factory_cnc_machine_05_top_steel_housing")
+    var cncFront = fallbackTex
+    var cncLeft = fallbackTex
+    var cncRight = fallbackTex
+    var cncBack = fallbackTex
+    var cncTop = fallbackTex
 
     // --- 11. Factory Wooden Cargo Crate (1) ---
-    val cargoCrate = load("factory_cargo_crate_all_6_sides_wooden")
+    var cargoCrate = fallbackTex
 
     // --- 12. Factory Steel Oil Drum (3) ---
-    val oilDrumSide = load("factory_steel_oil_drum_01_side_wrap", repeatX = true, repeatY = false)
-    val oilDrumTop = load("factory_steel_oil_drum_02_top_bung_caps")
-    val oilDrumBottom = load("factory_steel_oil_drum_03_bottom_base")
+    var oilDrumSide = fallbackTex
+    var oilDrumTop = fallbackTex
+    var oilDrumBottom = fallbackTex
 
     // --- 13. Modern Building Facades & Roofs (12) ---
-    val bldFactoryWall = load("building_factory_warehouse_01_side_wall_corrugated_metal", repeatX = true)
-    val bldFactoryRoof = load("building_factory_warehouse_02_top_roof_metal_skylight", repeatX = true)
-    val bldAptFront = load("building_modern_apartment_01_front_balconies_windows", repeatX = true)
-    val bldAptSide = load("building_modern_apartment_02_side_wall_windows_pipe", repeatX = true)
-    val bldAptBack = load("building_modern_apartment_03_back_utility_pipes", repeatX = true)
-    val bldAptRoof = load("building_modern_apartment_04_top_rooftop_concrete", repeatX = true)
-    val bldOfficeFront = load("building_office_tower_01_front_glass_curtain_wall", repeatX = true)
-    val bldOfficeSide = load("building_office_tower_02_side_glass_steel", repeatX = true)
-    val bldOfficeLobby = load("building_office_tower_03_ground_lobby_entrance", repeatX = true, repeatY = false)
-    val bldHouseFront = load("building_residential_house_01_front_stucco_door_window", repeatX = false)
-    val bldHouseSideBrick = load("building_residential_house_02_side_brick_wall", repeatX = true)
-    val bldShopFront = load("building_shop_showroom_01_front_glass_display_sign", repeatX = false)
+    var bldFactoryWall = fallbackTex
+    var bldFactoryRoof = fallbackTex
+    var bldAptFront = fallbackTex
+    var bldAptSide = fallbackTex
+    var bldAptBack = fallbackTex
+    var bldAptRoof = fallbackTex
+    var bldOfficeFront = fallbackTex
+    var bldOfficeSide = fallbackTex
+    var bldOfficeLobby = fallbackTex
+    var bldHouseFront = fallbackTex
+    var bldHouseSideBrick = fallbackTex
+    var bldShopFront = fallbackTex
 
     // --- 14. Interior Floors (3) ---
-    val floorEpoxy = load("interior_floor_factory_epoxy_concrete", repeatX = true)
-    val floorOakWood = load("interior_floor_natural_oak_wood_planks", repeatX = true)
-    val floorMarble = load("interior_floor_polished_marble_tiles_realistic", repeatX = true)
+    var floorEpoxy = fallbackTex
+    var floorOakWood = fallbackTex
+    var floorMarble = fallbackTex
 
     // --- 15. Hand-Controlled Interactive Gates (7) ---
-    val gateShutterFront = load("gate_factory_rollup_shutter_01_front_slats", repeatX = true)
-    val gateShutterBack = load("gate_factory_rollup_shutter_02_back_interior", repeatX = true)
-    val gateHouseFront = load("gate_house_single_metal_01_front_bars_handle")
-    val gateHouseBack = load("gate_house_single_metal_02_back_latch_hinges")
-    val gateVillaFront = load("gate_luxury_villa_wood_iron_01_front")
-    val gateVillaBack = load("gate_luxury_villa_wood_iron_02_back")
-    val gateAptSliding = load("gate_sliding_apartment_iron_01_front_and_back")
+    var gateShutterFront = fallbackTex
+    var gateShutterBack = fallbackTex
+    var gateHouseFront = fallbackTex
+    var gateHouseBack = fallbackTex
+    var gateVillaFront = fallbackTex
+    var gateVillaBack = fallbackTex
+    var gateAptSliding = fallbackTex
+
+    private val loadSteps: List<() -> Unit> = listOf(
+        // Facades & Gates first (visible immediately on city spawn)
+        { bldFactoryWall = load("building_factory_warehouse_01_side_wall_corrugated_metal", repeatX = true) },
+        { bldFactoryRoof = load("building_factory_warehouse_02_top_roof_metal_skylight", repeatX = true) },
+        { bldAptFront = load("building_modern_apartment_01_front_balconies_windows", repeatX = true) },
+        { bldAptSide = load("building_modern_apartment_02_side_wall_windows_pipe", repeatX = true) },
+        { bldAptBack = load("building_modern_apartment_03_back_utility_pipes", repeatX = true) },
+        { bldAptRoof = load("building_modern_apartment_04_top_rooftop_concrete", repeatX = true) },
+        { bldOfficeFront = load("building_office_tower_01_front_glass_curtain_wall", repeatX = true) },
+        { bldOfficeSide = load("building_office_tower_02_side_glass_steel", repeatX = true) },
+        { bldOfficeLobby = load("building_office_tower_03_ground_lobby_entrance", repeatX = true, repeatY = false) },
+        { bldHouseFront = load("building_residential_house_01_front_stucco_door_window", repeatX = false) },
+        { bldHouseSideBrick = load("building_residential_house_02_side_brick_wall", repeatX = true) },
+        { bldShopFront = load("building_shop_showroom_01_front_glass_display_sign", repeatX = false) },
+        { floorEpoxy = load("interior_floor_factory_epoxy_concrete", repeatX = true) },
+        { floorOakWood = load("interior_floor_natural_oak_wood_planks", repeatX = true) },
+        { floorMarble = load("interior_floor_polished_marble_tiles_realistic", repeatX = true) },
+        { gateShutterFront = load("gate_factory_rollup_shutter_01_front_slats", repeatX = true) },
+        { gateShutterBack = load("gate_factory_rollup_shutter_02_back_interior", repeatX = true) },
+        { gateHouseFront = load("gate_house_single_metal_01_front_bars_handle") },
+        { gateHouseBack = load("gate_house_single_metal_02_back_latch_hinges") },
+        { gateVillaFront = load("gate_luxury_villa_wood_iron_01_front") },
+        { gateVillaBack = load("gate_luxury_villa_wood_iron_02_back") },
+        { gateAptSliding = load("gate_sliding_apartment_iron_01_front_and_back") },
+        // Props & Rooftop units
+        { cargoCrate = load("factory_cargo_crate_all_6_sides_wooden") },
+        { oilDrumSide = load("factory_steel_oil_drum_01_side_wrap", repeatX = true, repeatY = false) },
+        { oilDrumTop = load("factory_steel_oil_drum_02_top_bung_caps") },
+        { oilDrumBottom = load("factory_steel_oil_drum_03_bottom_base") },
+        { acFront = load("ac_outdoor_unit_01_front_fan_grill_badge") },
+        { acBack = load("ac_outdoor_unit_02_back_radiator_fins") },
+        { acRight = load("ac_outdoor_unit_03_right_side_copper_pipes_valves") },
+        { acLeft = load("ac_outdoor_unit_04_left_side_intake_vents") },
+        { acTop = load("ac_outdoor_unit_05_top_metal_lid") },
+        { acBottom = load("ac_outdoor_unit_06_bottom_base_drain_feet") },
+        { waterTankSide = load("rooftop_water_tank_01_side_cylindrical_ribbed_black", repeatX = true, repeatY = false) },
+        { waterTankTop = load("rooftop_water_tank_02_top_lid_and_rings") },
+        { waterTankBottom = load("rooftop_water_tank_03_bottom_base") },
+        // Interior furniture
+        { bedTop = load("house_king_bed_01_top_mattress_duvet_pillows") },
+        { bedFront = load("house_king_bed_02_front_footboard_wood_and_sheets") },
+        { bedBack = load("house_king_bed_03_back_headboard_tufted_wood") },
+        { bedLeft = load("house_king_bed_04_left_side_profile_bedding") },
+        { bedRight = load("house_king_bed_05_right_side_profile_bedding") },
+        { bedBottom = load("house_king_bed_06_bottom_wooden_slats_frame") },
+        { sofaFront = load("house_modern_sofa_01_front_cushions_armrests") },
+        { sofaBack = load("house_modern_sofa_02_back_upholstered_fabric") },
+        { sofaLeft = load("house_modern_sofa_03_left_side_armrest") },
+        { sofaRight = load("house_modern_sofa_04_right_side_armrest") },
+        { sofaTop = load("house_modern_sofa_05_top_seats_and_backrest") },
+        { sofaBottom = load("house_modern_sofa_06_bottom_dust_cover_feet") },
+        { wardrobeFront = load("house_wooden_wardrobe_01_front_double_doors_handles") },
+        { wardrobeLeft = load("house_wooden_wardrobe_02_left_side_wood_panel") },
+        { wardrobeRight = load("house_wooden_wardrobe_03_right_side_wood_panel") },
+        { wardrobeBack = load("house_wooden_wardrobe_04_back_plywood_panel") },
+        { wardrobeTop = load("house_wooden_wardrobe_05_top_wood_surface") },
+        { wardrobeBottom = load("house_wooden_wardrobe_06_bottom_base_wood") },
+        { fridgeFront = load("house_refrigerator_01_front_stainless_steel_doors_dispenser") },
+        { fridgeLeft = load("house_refrigerator_02_left_side_textured_metal") },
+        { fridgeRight = load("house_refrigerator_03_right_side_textured_metal") },
+        { fridgeBack = load("house_refrigerator_04_back_compressor_coils") },
+        { fridgeTop = load("house_refrigerator_05_top_metal_hinge_covers") },
+        { fridgeBottom = load("house_refrigerator_06_bottom_base_leveling_feet") },
+        { tvFront = load("house_tv_unit_01_front_led_tv_and_cabinet") },
+        { tvBack = load("house_tv_unit_02_back_vents_and_ports") },
+        { tvLeft = load("house_tv_unit_03_left_side_wood_profile") },
+        { tvRight = load("house_tv_unit_04_right_side_wood_profile") },
+        { tvTop = load("house_tv_unit_05_top_wood_surface") },
+        { tvBottom = load("house_tv_unit_06_bottom_cabinet_underside") },
+        { kitchenFront = load("house_kitchen_counter_01_front_drawers_handles") },
+        { kitchenTop = load("house_kitchen_counter_02_top_granite_sink_stove") },
+        { kitchenLeft = load("house_kitchen_counter_03_left_side_panel") },
+        { kitchenRight = load("house_kitchen_counter_04_right_side_panel") },
+        { kitchenBackBacksplash = load("house_kitchen_counter_05_back_tiles_backsplash", repeatX = true, repeatY = false) },
+        { kitchenBottom = load("house_kitchen_counter_06_bottom_base_plinth") },
+        { deskFront = load("office_desk_pc_01_front_drawers_and_screen") },
+        { deskTop = load("office_desk_pc_02_top_wood_keyboard_mousepad") },
+        { deskBack = load("office_desk_pc_03_back_modesty_panel") },
+        { deskSide = load("office_desk_pc_04_side_steel_and_wood") },
+        { cncFront = load("factory_cnc_machine_01_front_door_control_screen") },
+        { cncLeft = load("factory_cnc_machine_02_left_side_vents_warning") },
+        { cncRight = load("factory_cnc_machine_03_right_side_vents_warning") },
+        { cncBack = load("factory_cnc_machine_04_back_cables_fan") },
+        { cncTop = load("factory_cnc_machine_05_top_steel_housing") }
+    )
+
+    val totalTextureCount: Int get() = loadSteps.size
+    val isFullyLoaded: Boolean get() = nextLoadIdx >= loadSteps.size
+
+    fun stepLoadBatch(batchSize: Int = 5): Pair<Int, Int> {
+        val end = (nextLoadIdx + batchSize).coerceAtMost(loadSteps.size)
+        while (nextLoadIdx < end) {
+            loadSteps[nextLoadIdx].invoke()
+            nextLoadIdx++
+        }
+        return nextLoadIdx to loadSteps.size
+    }
+
+    fun loadAllImmediate() {
+        stepLoadBatch(loadSteps.size)
+    }
 }
 
 /**

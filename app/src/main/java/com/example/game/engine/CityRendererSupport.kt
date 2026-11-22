@@ -107,67 +107,67 @@ class CityRenderAssets(
     val carCabinMesh: GlMesh,
     val ringMesh: GlMesh,
     val crossedLeafMesh: GlMesh,
-    val texBuilding: Int,
-    val texRoad: Int,
-    val texGrass: Int,
-    val texBark: Int,
-    val texLeafCluster: Int,
-    val texInteriorFloor: Int,
-    val texConcrete: Int,
+    var texBuilding: Int,
+    var texRoad: Int,
+    var texGrass: Int,
+    var texBark: Int,
+    var texLeafCluster: Int,
+    var texInteriorFloor: Int,
+    var texConcrete: Int,
     val texWhite: Int,
     val playerHeadMesh: GlMesh = sphereMesh,
     val playerTorsoMesh: GlMesh = cylinderMesh,
-    val texPlayerFace: Int = texWhite,
-    val texPlayerShirt: Int = texWhite,
-    val texPlayerJeans: Int = texWhite,
+    var texPlayerFace: Int = texWhite,
+    var texPlayerShirt: Int = texWhite,
+    var texPlayerJeans: Int = texWhite,
     val verticalQuadMesh: GlMesh = quadMesh,
     val crossedGrassMesh: GlMesh = crossedLeafMesh,
     val skyDomeMesh: GlMesh = sphereMesh,
     // Batch 1 custom world textures
-    val texAirportRunway: Int = texRoad,
-    val tex3dGrassBlades: Int = texLeafCluster,
-    val texArmyBarbedFence: Int = texWhite,
-    val texArmyCamo: Int = texConcrete,
-    val texArmyHelipad: Int = texConcrete,
-    val texArmyBunkerConcrete: Int = texConcrete,
-    val texBuildingGlassFacade: Int = texBuilding,
-    val texBirdFeathers: Int = texWhite,
-    val texBulletBikeTank: Int = texWhite,
-    val texEnvCloudPuff: Int = texWhite,
+    var texAirportRunway: Int = texRoad,
+    var tex3dGrassBlades: Int = texLeafCluster,
+    var texArmyBarbedFence: Int = texWhite,
+    var texArmyCamo: Int = texConcrete,
+    var texArmyHelipad: Int = texConcrete,
+    var texArmyBunkerConcrete: Int = texConcrete,
+    var texBuildingGlassFacade: Int = texBuilding,
+    var texBirdFeathers: Int = texWhite,
+    var texBulletBikeTank: Int = texWhite,
+    var texEnvCloudPuff: Int = texWhite,
     // Batch 2: Sky & Weather (5)
-    val texEnvSkyDay: Int = texWhite,
-    val texEnvSkyNight: Int = texWhite,
-    val texEnvSunGlow: Int = texWhite,
-    val texEnvMoon: Int = texWhite,
-    val texEnvRainStreaks: Int = texWhite,
+    var texEnvSkyDay: Int = texWhite,
+    var texEnvSkyNight: Int = texWhite,
+    var texEnvSunGlow: Int = texWhite,
+    var texEnvMoon: Int = texWhite,
+    var texEnvRainStreaks: Int = texWhite,
     // Batch 2: Water & Roads (5)
-    val texWaterOcean: Int = texWhite,
-    val texWaterNormal: Int = texWhite,
-    val texRoadAsphaltDetailed: Int = texRoad,
-    val texIntersectionAsphalt: Int = texRoad,
-    val texColonyAlley: Int = texConcrete,
-    val texFootpathPaverBlocks: Int = texConcrete,
-    val texWaterRoadPuddleReflect: Int = texWhite,
+    var texWaterOcean: Int = texWhite,
+    var texWaterNormal: Int = texWhite,
+    var texRoadAsphaltDetailed: Int = texRoad,
+    var texIntersectionAsphalt: Int = texRoad,
+    var texColonyAlley: Int = texConcrete,
+    var texFootpathPaverBlocks: Int = texConcrete,
+    var texWaterRoadPuddleReflect: Int = texWhite,
     // Batch 2: Trees & Foliage (4)
-    val texTreeBark: Int = texBark,
-    val texTreeLeavesBroad: Int = texLeafCluster,
-    val texTreeLeavesPalm: Int = texLeafCluster,
-    val texTreeLeavesPine: Int = texLeafCluster,
+    var texTreeBark: Int = texBark,
+    var texTreeLeavesBroad: Int = texLeafCluster,
+    var texTreeLeavesPalm: Int = texLeafCluster,
+    var texTreeLeavesPine: Int = texLeafCluster,
     // Batch 2: Buildings, Shops & Interiors (6)
-    val texHouseRedBrick: Int = texBuilding,
-    val texHouseExteriorWindows: Int = texBuilding,
-    val texShopShutter: Int = texConcrete,
-    val texInteriorWallPaint: Int = texConcrete,
-    val texInteriorWoodFloor: Int = texInteriorFloor,
-    val texInteriorMarbleTiles: Int = texInteriorFloor,
+    var texHouseRedBrick: Int = texBuilding,
+    var texHouseExteriorWindows: Int = texBuilding,
+    var texShopShutter: Int = texConcrete,
+    var texInteriorWallPaint: Int = texConcrete,
+    var texInteriorWoodFloor: Int = texInteriorFloor,
+    var texInteriorMarbleTiles: Int = texInteriorFloor,
     // Batch 2: Industrial, Port & Vehicles (3)
-    val texFactoryCorrugatedMetal: Int = texConcrete,
-    val texPortContainerSteel: Int = texConcrete,
-    val texVehicleTireTread: Int = texWhite,
+    var texFactoryCorrugatedMetal: Int = texConcrete,
+    var texPortContainerSteel: Int = texConcrete,
+    var texVehicleTireTread: Int = texWhite,
     // Batch 3: 80-Texture Realistic Multi-Angle Pack + 3-Part Split Cylinder VBO
     val splitCylinderMesh: GlMesh = cylinderMesh,
     val splitCylinderSegments: Int = 16,
-    val multiAngle: MultiAngleTextureManager? = null
+    var multiAngle: MultiAngleTextureManager? = null
 )
 
 /**
@@ -364,7 +364,7 @@ object CityPropDrawer {
     // 1. REALISTIC MULTI-PART BOTANICAL TREES (Root Flare + Bark + Primary Branches + Twigs + Leaf Clusters)
     // -------------------------------------------------------------------------
 
-    fun drawRealisticTree(dc: GlDrawContext, t: TreeProp, worldTime: Float, quality: GraphicsQuality) {
+    fun drawRealisticTree(dc: GlDrawContext, t: TreeProp, worldTime: Float, quality: GraphicsQuality, groundY: Float = 0f) {
         val s = t.scale
         val sway = sin(worldTime * 1.55f + t.seed) * 1.9f
         val barkTex = dc.assets.texTreeBark
@@ -379,7 +379,7 @@ object CityPropDrawer {
                 val segCount = 4
                 val segH = 1.52f * s
                 var curX = t.x
-                var curY = 0.0f
+                var curY = groundY
                 var curZ = t.z
 
                 for (i in 0 until segCount) {
@@ -451,13 +451,13 @@ object CityPropDrawer {
                 // Hillside / Park Conifer Pine Tree (tall bark trunk + 4 tiered conical pine boughs with tex_tree_leaves_pine!)
                 dc.bindVbo(trunkMesh)
                 dc.drawMeshTransformed(
-                    t.x, 0.32f * s, t.z,
+                    t.x, groundY + 0.32f * s, t.z,
                     0.78f * s, 0.65f * s, 0.78f * s,
                     (t.seed * 41f) % 360f, 0f, 0f,
                     barkTex, 2f, 1f, 0.86f, 0.78f, 0.70f, 1f, 0f, 0.04f, 6f, 0f, trunkMesh
                 )
                 dc.drawMeshTransformed(
-                    t.x, 2.75f * s, t.z,
+                    t.x, groundY + 2.75f * s, t.z,
                     0.46f * s, 5.4f * s, 0.46f * s,
                     (t.seed * 29f) % 360f, sway * 0.15f, 0f,
                     barkTex, 2f, 3.6f, 0.90f, 0.82f, 0.74f, 1f, 0f, 0.04f, 6f, 0f, trunkMesh
@@ -470,7 +470,7 @@ object CityPropDrawer {
                 val tiers = if (quality == GraphicsQuality.LOW) 3 else 4
                 for (tier in 0 until tiers) {
                     val frac = tier.toFloat() / (tiers - 1).coerceAtLeast(1)
-                    val tierY = (2.15f + tier * 1.30f) * s
+                    val tierY = groundY + (2.15f + tier * 1.30f) * s
                     val tierW = (3.45f - frac * 1.75f) * s
                     val tierH = (2.15f - frac * 0.45f) * s
                     val shade = 0.86f + frac * 0.16f
@@ -491,13 +491,13 @@ object CityPropDrawer {
                 // Standard City / Park Broad-Leaf Oak/Neem Tree (Root Flare + Bark + Branches + Twigs + tex_tree_leaves_broad!)
                 dc.bindVbo(trunkMesh)
                 dc.drawMeshTransformed(
-                    t.x, 0.35f * s, t.z,
+                    t.x, groundY + 0.35f * s, t.z,
                     0.95f * s, 0.70f * s, 0.95f * s,
                     (t.seed * 45f) % 360f, 0f, 0f,
                     barkTex, 2f, 1f, 0.88f, 0.80f, 0.72f, 1f, 0f, 0.04f, 6f, 0f, trunkMesh
                 )
                 dc.drawMeshTransformed(
-                    t.x, 1.85f * s, t.z,
+                    t.x, groundY + 1.85f * s, t.z,
                     0.58f * s, 3.3f * s, 0.58f * s,
                     (t.seed * 37f) % 360f, sway * 0.18f, 0f,
                     barkTex, 2f, 2.8f, 0.94f, 0.87f, 0.80f, 1f, 0f, 0.05f, 8f, 0f, trunkMesh
@@ -511,7 +511,7 @@ object CityPropDrawer {
                     val rad = baseYaw * PI.toFloat() / 180f
                     val dirX = cos(rad)
                     val dirZ = sin(rad)
-                    val originY = (2.65f + (b % 2) * 0.42f) * s
+                    val originY = groundY + (2.65f + (b % 2) * 0.42f) * s
                     val branchLen = (2.15f + (b % 3) * 0.25f) * s
                     val midX = t.x + dirX * branchLen * 0.38f
                     val midZ = t.z + dirZ * branchLen * 0.38f
@@ -556,9 +556,9 @@ object CityPropDrawer {
                     }
                 }
 
-                twigClusters.add(floatArrayOf(t.x + sway * 0.02f, 4.95f * s, t.z, 2.85f * s, t.seed * 23f))
-                twigClusters.add(floatArrayOf(t.x + 0.55f * s + sway * 0.02f, 4.45f * s, t.z - 0.45f * s, 2.30f * s, t.seed * 41f))
-                twigClusters.add(floatArrayOf(t.x - 0.55f * s + sway * 0.02f, 4.50f * s, t.z + 0.45f * s, 2.30f * s, t.seed * 67f))
+                twigClusters.add(floatArrayOf(t.x + sway * 0.02f, groundY + 4.95f * s, t.z, 2.85f * s, t.seed * 23f))
+                twigClusters.add(floatArrayOf(t.x + 0.55f * s + sway * 0.02f, groundY + 4.45f * s, t.z - 0.45f * s, 2.30f * s, t.seed * 41f))
+                twigClusters.add(floatArrayOf(t.x - 0.55f * s + sway * 0.02f, groundY + 4.50f * s, t.z + 0.45f * s, 2.30f * s, t.seed * 67f))
 
                 GLES20.glDisable(GLES20.GL_CULL_FACE)
                 val leafMesh = dc.assets.crossedLeafMesh
@@ -679,31 +679,38 @@ object CityPropDrawer {
         dc: GlDrawContext,
         x: Float, z: Float, yawDeg: Float,
         wheelAngleDeg: Float,
-        r: Float, g: Float, b: Float
+        r: Float, g: Float, b: Float,
+        groundY: Float = 0f,
+        pitchDeg: Float = 0f,
+        rollDeg: Float = 0f
     ) {
         val white = dc.assets.texWhite
 
-        // Sculpted metallic chassis
+        // Sculpted metallic chassis aligned smoothly to 3D road/ramp/hill surface normal!
         dc.bindVbo(dc.assets.carBodyMesh)
         Matrix.setIdentityM(dc.modelMatrix, 0)
-        Matrix.translateM(dc.modelMatrix, 0, x, 0.06f, z)
+        Matrix.translateM(dc.modelMatrix, 0, x, groundY + 0.06f, z)
         Matrix.rotateM(dc.modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+        if (pitchDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, pitchDeg, 1f, 0f, 0f)
+        if (rollDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, rollDeg, 0f, 0f, 1f)
         dc.commitDraw(white, 1f, 1f, r, g, b, 1f, 0.02f, 0.85f, 48f, 0.36f, dc.assets.carBodyMesh.vertexCount)
 
         // Cabin interior seats & dashboard visible through translucent windshield
         dc.bindVbo(dc.assets.cubeMesh)
-        drawCarLocalPart(dc, x, z, yawDeg, -0.34f, 0.94f, -0.32f, 0.42f, 0.48f, 0.32f, 0.20f, 0.18f, 0.16f, 0f)
-        drawCarLocalPart(dc, x, z, yawDeg,  0.34f, 0.94f, -0.32f, 0.42f, 0.48f, 0.32f, 0.20f, 0.18f, 0.16f, 0f)
-        drawCarLocalPart(dc, x, z, yawDeg,  0.00f, 0.96f,  0.48f, 1.38f, 0.22f, 0.28f, 0.14f, 0.15f, 0.17f, 0f)
+        drawCarLocalPart(dc, x, z, yawDeg, -0.34f, 0.94f, -0.32f, 0.42f, 0.48f, 0.32f, 0.20f, 0.18f, 0.16f, 0f, groundY, pitchDeg, rollDeg)
+        drawCarLocalPart(dc, x, z, yawDeg,  0.34f, 0.94f, -0.32f, 0.42f, 0.48f, 0.32f, 0.20f, 0.18f, 0.16f, 0f, groundY, pitchDeg, rollDeg)
+        drawCarLocalPart(dc, x, z, yawDeg,  0.00f, 0.96f,  0.48f, 1.38f, 0.22f, 0.28f, 0.14f, 0.15f, 0.17f, 0f, groundY, pitchDeg, rollDeg)
 
         // Tinted glossy glass greenhouse cabin
         dc.bindVbo(dc.assets.carCabinMesh)
         Matrix.setIdentityM(dc.modelMatrix, 0)
-        Matrix.translateM(dc.modelMatrix, 0, x, 0.06f, z)
+        Matrix.translateM(dc.modelMatrix, 0, x, groundY + 0.06f, z)
         Matrix.rotateM(dc.modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+        if (pitchDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, pitchDeg, 1f, 0f, 0f)
+        if (rollDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, rollDeg, 0f, 0f, 1f)
         dc.commitDraw(white, 1f, 1f, 0.12f, 0.18f, 0.25f, 0.84f, 0.03f, 0.95f, 64f, 0.56f, dc.assets.carCabinMesh.vertexCount)
 
-        // 4 Cylindrical Rubber Tires mapped with tex_vehicle_tire_tread + Alloy Rims (rotating with vehicle speed!)
+        // 4 Cylindrical Rubber Tires mapped with tex_vehicle_tire_tread + Alloy Rims (tilted on slope!)
         dc.bindVbo(dc.assets.cylinderMesh)
         val tireTex = dc.assets.texVehicleTireTread
         val wheels = arrayOf(
@@ -714,8 +721,10 @@ object CityPropDrawer {
         )
         for (wp in wheels) {
             Matrix.setIdentityM(dc.modelMatrix, 0)
-            Matrix.translateM(dc.modelMatrix, 0, x, 0.02f, z)
+            Matrix.translateM(dc.modelMatrix, 0, x, groundY + 0.02f, z)
             Matrix.rotateM(dc.modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+            if (pitchDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, pitchDeg, 1f, 0f, 0f)
+            if (rollDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, rollDeg, 0f, 0f, 1f)
             Matrix.translateM(dc.modelMatrix, 0, wp[0], wp[1], wp[2])
             Matrix.rotateM(dc.modelMatrix, 0, 90f, 0f, 0f, 1f)
             Matrix.rotateM(dc.modelMatrix, 0, wheelAngleDeg, 0f, 1f, 0f)
@@ -724,8 +733,10 @@ object CityPropDrawer {
 
             // Alloy rim center
             Matrix.setIdentityM(dc.modelMatrix, 0)
-            Matrix.translateM(dc.modelMatrix, 0, x, 0.02f, z)
+            Matrix.translateM(dc.modelMatrix, 0, x, groundY + 0.02f, z)
             Matrix.rotateM(dc.modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+            if (pitchDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, pitchDeg, 1f, 0f, 0f)
+            if (rollDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, rollDeg, 0f, 0f, 1f)
             Matrix.translateM(dc.modelMatrix, 0, wp[0] + (if (wp[0] > 0f) 0.035f else -0.035f), wp[1], wp[2])
             Matrix.rotateM(dc.modelMatrix, 0, 90f, 0f, 0f, 1f)
             Matrix.rotateM(dc.modelMatrix, 0, wheelAngleDeg, 0f, 1f, 0f)
@@ -735,31 +746,43 @@ object CityPropDrawer {
 
         // Front grille, splitter bumper, rear diffuser, mirrors, headlights & taillights
         dc.bindVbo(dc.assets.cubeMesh)
-        drawCarLocalPart(dc, x, z, yawDeg,  0.00f, 0.40f,  2.26f, 0.92f, 0.18f, 0.08f, 0.12f, 0.13f, 0.15f, 0f)
-        drawCarLocalPart(dc, x, z, yawDeg,  0.00f, 0.30f, -2.23f, 1.56f, 0.16f, 0.12f, 0.14f, 0.15f, 0.18f, 0f)
+        drawCarLocalPart(dc, x, z, yawDeg,  0.00f, 0.40f,  2.26f, 0.92f, 0.18f, 0.08f, 0.12f, 0.13f, 0.15f, 0f, groundY, pitchDeg, rollDeg)
+        drawCarLocalPart(dc, x, z, yawDeg,  0.00f, 0.30f, -2.23f, 1.56f, 0.16f, 0.12f, 0.14f, 0.15f, 0.18f, 0f, groundY, pitchDeg, rollDeg)
         // Side mirrors
-        drawCarLocalPart(dc, x, z, yawDeg, -0.98f, 1.00f,  0.54f, 0.16f, 0.11f, 0.20f, r, g, b, 0f)
-        drawCarLocalPart(dc, x, z, yawDeg,  0.98f, 1.00f,  0.54f, 0.16f, 0.11f, 0.20f, r, g, b, 0f)
+        drawCarLocalPart(dc, x, z, yawDeg, -0.98f, 1.00f,  0.54f, 0.16f, 0.11f, 0.20f, r, g, b, 0f, groundY, pitchDeg, rollDeg)
+        drawCarLocalPart(dc, x, z, yawDeg,  0.98f, 1.00f,  0.54f, 0.16f, 0.11f, 0.20f, r, g, b, 0f, groundY, pitchDeg, rollDeg)
         // Headlights
-        drawCarLocalPart(dc, x, z, yawDeg, -0.60f, 0.48f,  2.22f, 0.32f, 0.12f, 0.10f, 1.0f, 0.97f, 0.86f, 0.95f)
-        drawCarLocalPart(dc, x, z, yawDeg,  0.60f, 0.48f,  2.22f, 0.32f, 0.12f, 0.10f, 1.0f, 0.97f, 0.86f, 0.95f)
+        drawCarLocalPart(dc, x, z, yawDeg, -0.60f, 0.48f,  2.22f, 0.32f, 0.12f, 0.10f, 1.0f, 0.97f, 0.86f, 0.95f, groundY, pitchDeg, rollDeg)
+        drawCarLocalPart(dc, x, z, yawDeg,  0.60f, 0.48f,  2.22f, 0.32f, 0.12f, 0.10f, 1.0f, 0.97f, 0.86f, 0.95f, groundY, pitchDeg, rollDeg)
         // LED Taillights
-        drawCarLocalPart(dc, x, z, yawDeg, -0.60f, 0.66f, -2.21f, 0.36f, 0.12f, 0.08f, 1.0f, 0.14f, 0.16f, 0.90f)
-        drawCarLocalPart(dc, x, z, yawDeg,  0.60f, 0.66f, -2.21f, 0.36f, 0.12f, 0.08f, 1.0f, 0.14f, 0.16f, 0.90f)
+        drawCarLocalPart(dc, x, z, yawDeg, -0.60f, 0.66f, -2.21f, 0.36f, 0.12f, 0.08f, 1.0f, 0.14f, 0.16f, 0.90f, groundY, pitchDeg, rollDeg)
+        drawCarLocalPart(dc, x, z, yawDeg,  0.60f, 0.66f, -2.21f, 0.36f, 0.12f, 0.08f, 1.0f, 0.14f, 0.16f, 0.90f, groundY, pitchDeg, rollDeg)
     }
 
-    fun drawCarShadow(dc: GlDrawContext, x: Float, z: Float, yawDeg: Float) {
+    fun drawCarShadow(
+        dc: GlDrawContext,
+        x: Float,
+        z: Float,
+        yawDeg: Float,
+        groundY: Float = 0f,
+        pitchDeg: Float = 0f,
+        rollDeg: Float = 0f
+    ) {
         val white = dc.assets.texWhite
         dc.bindShadowVbo(dc.assets.carBodyMesh)
         Matrix.setIdentityM(dc.modelMatrix, 0)
-        Matrix.translateM(dc.modelMatrix, 0, x, 0.06f, z)
+        Matrix.translateM(dc.modelMatrix, 0, x, groundY + 0.06f, z)
         Matrix.rotateM(dc.modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+        if (pitchDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, pitchDeg, 1f, 0f, 0f)
+        if (rollDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, rollDeg, 0f, 0f, 1f)
         dc.commitShadow(white, dc.assets.carBodyMesh.vertexCount)
 
         dc.bindShadowVbo(dc.assets.carCabinMesh)
         Matrix.setIdentityM(dc.modelMatrix, 0)
-        Matrix.translateM(dc.modelMatrix, 0, x, 0.06f, z)
+        Matrix.translateM(dc.modelMatrix, 0, x, groundY + 0.06f, z)
         Matrix.rotateM(dc.modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+        if (pitchDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, pitchDeg, 1f, 0f, 0f)
+        if (rollDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, rollDeg, 0f, 0f, 1f)
         dc.commitShadow(white, dc.assets.carCabinMesh.vertexCount)
 
         dc.bindShadowVbo(dc.assets.cylinderMesh)
@@ -771,8 +794,10 @@ object CityPropDrawer {
         )
         for (wp in wheels) {
             Matrix.setIdentityM(dc.modelMatrix, 0)
-            Matrix.translateM(dc.modelMatrix, 0, x, 0.02f, z)
+            Matrix.translateM(dc.modelMatrix, 0, x, groundY + 0.02f, z)
             Matrix.rotateM(dc.modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+            if (pitchDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, pitchDeg, 1f, 0f, 0f)
+            if (rollDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, rollDeg, 0f, 0f, 1f)
             Matrix.translateM(dc.modelMatrix, 0, wp[0], wp[1], wp[2])
             Matrix.rotateM(dc.modelMatrix, 0, 90f, 0f, 0f, 1f)
             Matrix.scaleM(dc.modelMatrix, 0, 0.68f, 0.24f, 0.68f)
@@ -784,11 +809,16 @@ object CityPropDrawer {
         dc: GlDrawContext, cx: Float, cz: Float, yawDeg: Float,
         lx: Float, ly: Float, lz: Float,
         sx: Float, sy: Float, sz: Float,
-        r: Float, g: Float, b: Float, emissive: Float
+        r: Float, g: Float, b: Float, emissive: Float,
+        groundY: Float = 0f,
+        pitchDeg: Float = 0f,
+        rollDeg: Float = 0f
     ) {
         Matrix.setIdentityM(dc.modelMatrix, 0)
-        Matrix.translateM(dc.modelMatrix, 0, cx, 0.06f, cz)
+        Matrix.translateM(dc.modelMatrix, 0, cx, groundY + 0.06f, cz)
         Matrix.rotateM(dc.modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+        if (pitchDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, pitchDeg, 1f, 0f, 0f)
+        if (rollDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, rollDeg, 0f, 0f, 1f)
         Matrix.translateM(dc.modelMatrix, 0, lx, ly, lz)
         Matrix.scaleM(dc.modelMatrix, 0, sx, sy, sz)
         dc.commitDraw(dc.assets.texWhite, 1f, 1f, r, g, b, 1f, emissive, 0.55f, 26f, 0.18f, dc.assets.cubeMesh.vertexCount)
@@ -1137,13 +1167,14 @@ object CityPropDrawer {
     }
 
     fun drawNpcCharacter(dc: GlDrawContext, npc: NpcAgent, worldTime: Float) {
+        val groundY = WorldMapData.getTerrainHeight(npc.x, npc.z)
         drawArticulatedHuman(
             dc = dc,
-            x = npc.x, y = 0f, z = npc.z,
+            x = npc.x, y = groundY, z = npc.z,
             yawRad = npc.yawRad,
             walkCycle = npc.walkPhase,
-            isMoving = npc.pauseTimer <= 0f,
-            isSprinting = false,
+            isMoving = npc.pauseTimer <= 0f || npc.fleeTimer > 0f,
+            isSprinting = npc.fleeTimer > 0f,
             isGrounded = true,
             worldTime = worldTime,
             isWoman = npc.isWoman,

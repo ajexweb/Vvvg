@@ -25,7 +25,14 @@ object WorldAssetsDrawer {
     // 1. ROYAL ENFIELD BULLET MOTORCYCLE (tex_bullet_bike_tank)
     // -------------------------------------------------------------------------
 
-    fun drawBulletBike(dc: GlDrawContext, bike: BulletBikeProp, isRidden: Boolean = false) {
+    fun drawBulletBike(
+        dc: GlDrawContext,
+        bike: BulletBikeProp,
+        isRidden: Boolean = false,
+        groundY: Float = 0f,
+        riderSpeed: Float = 0f,
+        worldTime: Float = 0f
+    ) {
         val a = dc.assets
         val white = a.texWhite
         val cyl = a.cylinderMesh
@@ -33,11 +40,17 @@ object WorldAssetsDrawer {
         val sph = a.sphereMesh
 
         Matrix.setIdentityM(mBase, 0)
-        Matrix.translateM(mBase, 0, bike.x, 0.02f, bike.z)
+        Matrix.translateM(mBase, 0, bike.x, groundY + 0.02f, bike.z)
         Matrix.rotateM(mBase, 0, bike.yawDeg, 0f, 1f, 0f)
-        // Parked kickstand lean when dismounted; upright when ridden!
+        // Align motorcycle chassis to road/ramp/hill surface pitch & roll!
+        if (bike.pitchDeg != 0f) Matrix.rotateM(mBase, 0, bike.pitchDeg, 1f, 0f, 0f)
+        if (bike.rollDeg != 0f) Matrix.rotateM(mBase, 0, bike.rollDeg, 0f, 0f, 1f)
+        // Parked kickstand lean when dismounted; slight cornering lean when ridden!
         if (!isRidden) {
             Matrix.rotateM(mBase, 0, -6.5f, 0f, 0f, 1f)
+        } else {
+            val turnLean = (-bike.steerDeg * 0.52f).coerceIn(-16f, 16f)
+            if (turnLean != 0f) Matrix.rotateM(mBase, 0, turnLean, 0f, 0f, 1f)
         }
 
         // Front & rear rubber tires mapped with tex_vehicle_tire_tread + chrome spoked rims
@@ -52,6 +65,10 @@ object WorldAssetsDrawer {
         drawLocal(dc, mBase, 0f, 0.50f, 0.06f, 0.36f, 0.36f, 0.38f, 0f, 0f, white, 1f, 1f, 0.78f, 0.80f, 0.84f, 0f, 0.90f, 52f, 0.40f, cyl)
         drawLocal(dc, mBase, 0f, 0.36f, -0.05f, 0.38f, 0.22f, 0.42f, 0f, 0f, white, 1f, 1f, 0.72f, 0.75f, 0.80f, 0f, 0.85f, 44f, 0.35f, cube)
 
+        // Left & Right Chrome Rider Footpegs (exact contact anchors at x=±0.26, y=0.33, z=0.04)
+        drawLocal(dc, mBase, -0.26f, 0.33f, 0.04f, 0.16f, 0.045f, 0.055f, 0f, 0f, white, 1f, 1f, 0.82f, 0.84f, 0.88f, 0f, 0.85f, 42f, 0.32f, cube)
+        drawLocal(dc, mBase,  0.26f, 0.33f, 0.04f, 0.16f, 0.045f, 0.055f, 0f, 0f, white, 1f, 1f, 0.82f, 0.84f, 0.88f, 0f, 0.85f, 42f, 0.32f, cube)
+
         // Iconic Bullet Teardrop Fuel Tank mapped with tex_bullet_bike_tank (Black + Dual Gold Pinstripes!)
         drawLocal(
             dc, mBase, 0f, 0.85f, 0.22f,
@@ -63,7 +80,7 @@ object WorldAssetsDrawer {
         drawLocal(dc, mBase, 0f, 1.00f, 0.28f, 0.08f, 0.03f, 0.08f, 0f, 0f, white, 1f, 1f, 0.90f, 0.92f, 0.95f, 0f, 0.95f, 56f, 0.45f, cyl)
 
         // Ribbed Classic Leather Dual Seat
-        drawLocal(dc, mBase, 0f, 0.79f, -0.34f, 0.32f, 0.15f, 0.68f, 4f, 0f, white, 1f, 1f, 0.14f, 0.11f, 0.10f, 0f, 0.24f, 16f, 0.05f, cube)
+        drawLocal(dc, mBase, 0f, 0.79f, -0.34f, 0.34f, 0.15f, 0.70f, 4f, 0f, white, 1f, 1f, 0.14f, 0.11f, 0.10f, 0f, 0.24f, 16f, 0.05f, cube)
         // Rear chrome grab rail & red brake taillight
         drawLocal(dc, mBase, 0f, 0.74f, -0.86f, 0.20f, 0.10f, 0.16f, 0f, 0f, white, 1f, 1f, 0.94f, 0.14f, 0.14f, 0.70f, 0.6f, 24f, 0.15f, cube)
 
@@ -76,10 +93,13 @@ object WorldAssetsDrawer {
             drawLocal(dc, mBase, fx, 0.70f, 0.64f, 0.055f, 0.78f, 0.055f, -22f, 0f, white, 1f, 1f, 0.86f, 0.88f, 0.92f, 0f, 0.92f, 56f, 0.42f, cyl)
         }
 
-        // Wide Swept Chrome Handlebars + Black Grips
-        drawLocal(dc, mBase, 0f, 1.07f, 0.48f, 0.74f, 0.04f, 0.04f, 0f, 0f, white, 1f, 1f, 0.88f, 0.90f, 0.94f, 0f, 0.95f, 56f, 0.42f, cube)
-        drawLocal(dc, mBase, -0.36f, 1.07f, 0.46f, 0.15f, 0.055f, 0.055f, 0f, 0f, white, 1f, 1f, 0.10f, 0.10f, 0.11f, 0f, 0.15f, 12f, 0.02f, cube)
-        drawLocal(dc, mBase,  0.36f, 1.07f, 0.46f, 0.15f, 0.055f, 0.055f, 0f, 0f, white, 1f, 1f, 0.10f, 0.10f, 0.11f, 0f, 0.15f, 12f, 0.02f, cube)
+        // Wide Swept Chrome Handlebars + Black Rubber Grips (follow steerDeg slightly!)
+        val steerRad = bike.steerDeg * (PI.toFloat() / 180f) * 0.42f
+        val gripOffZ = sin(steerRad) * 0.36f
+        val barYaw = bike.steerDeg * 0.42f
+        drawLocal(dc, mBase, 0f, 1.07f, 0.48f, 0.74f, 0.04f, 0.04f, 0f, barYaw, white, 1f, 1f, 0.88f, 0.90f, 0.94f, 0f, 0.95f, 56f, 0.42f, cube)
+        drawLocal(dc, mBase, -0.36f, 1.07f, 0.46f - gripOffZ, 0.15f, 0.055f, 0.055f, 0f, barYaw, white, 1f, 1f, 0.10f, 0.10f, 0.11f, 0f, 0.15f, 12f, 0.02f, cube)
+        drawLocal(dc, mBase,  0.36f, 1.07f, 0.46f + gripOffZ, 0.15f, 0.055f, 0.055f, 0f, barYaw, white, 1f, 1f, 0.10f, 0.10f, 0.11f, 0f, 0.15f, 12f, 0.02f, cube)
 
         // Iconic Round Bullet Chrome Headlamp Casquette + Glowing Lens
         drawLocal(dc, mBase, 0f, 0.98f, 0.64f, 0.22f, 0.22f, 0.24f, 0f, 0f, white, 1f, 1f, 0.84f, 0.86f, 0.90f, 0f, 0.92f, 56f, 0.44f, sph)
@@ -87,14 +107,153 @@ object WorldAssetsDrawer {
 
         // Iconic Long Chrome Peashooter Exhaust Silencer Pipe (right side)
         drawLocal(dc, mBase, -0.21f, 0.30f, -0.28f, 0.09f, 0.09f, 1.18f, 3f, 0f, white, 1f, 1f, 0.88f, 0.90f, 0.94f, 0f, 0.96f, 64f, 0.48f, cube)
+
+        // Anatomically Grounded Seated Rider inside mBase:
+        // Hips firmly on leather seat (0, 0.88, -0.28), sneakers squarely on chrome footpegs (±0.26, 0.36, 0.04),
+        // and BOTH hands gripping the exact handlebar grips (±0.36, 1.07, 0.46 ± gripOffZ)!
+        if (isRidden) {
+            drawSeatedBikeRider(dc, mBase, gripOffZ, bike.steerDeg, riderSpeed, worldTime)
+        }
     }
 
-    fun drawBulletBikeShadow(dc: GlDrawContext, bike: BulletBikeProp) {
+    private fun drawLimbSegment(
+        dc: GlDrawContext,
+        base: FloatArray,
+        x0: Float, y0: Float, z0: Float,
+        x1: Float, y1: Float, z1: Float,
+        radius: Float,
+        r: Float, g: Float, b: Float
+    ) {
+        val dx = x1 - x0
+        val dy = y1 - y0
+        val dz = z1 - z0
+        val len = kotlin.math.sqrt(dx * dx + dy * dy + dz * dz).coerceAtLeast(0.02f)
+        val mx = (x0 + x1) * 0.5f
+        val my = (y0 + y1) * 0.5f
+        val mz = (z0 + z1) * 0.5f
+
+        val yawDeg = atan2(dx, dz) * (180f / PI.toFloat())
+        val horiz = kotlin.math.sqrt(dx * dx + dz * dz)
+        val pitchFromUpDeg = atan2(horiz, dy) * (180f / PI.toFloat())
+
+        dc.bindVbo(dc.assets.cylinderMesh)
+        System.arraycopy(base, 0, dc.modelMatrix, 0, 16)
+        Matrix.translateM(dc.modelMatrix, 0, mx, my, mz)
+        Matrix.rotateM(dc.modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+        Matrix.rotateM(dc.modelMatrix, 0, pitchFromUpDeg, 1f, 0f, 0f)
+        Matrix.scaleM(dc.modelMatrix, 0, radius * 2f, len, radius * 2f)
+        dc.commitDraw(dc.assets.texWhite, 1f, 1f, r, g, b, 1f, 0f, 0.22f, 14f, 0.04f, dc.assets.cylinderMesh.vertexCount)
+    }
+
+    private fun drawSeatedBikeRider(
+        dc: GlDrawContext,
+        base: FloatArray,
+        gripOffZ: Float,
+        steerDeg: Float,
+        riderSpeed: Float,
+        worldTime: Float
+    ) {
+        val white = dc.assets.texWhite
+        val cube = dc.assets.cubeMesh
+        val sph = dc.assets.sphereMesh
+        val cyl = dc.assets.cylinderMesh
+
+        val breathe = sin(worldTime * 3.2f) * 0.008f
+        val speedCrouch = (kotlin.math.abs(riderSpeed) / 30f).coerceIn(0f, 1f) * 0.055f
+
+        // Ajay Saini Palette (olive street hoodie/jacket, deep denim jeans, warm skin, dark hair & beard, crisp sneakers)
+        val skinR = 0.78f; val skinG = 0.56f; val skinB = 0.42f
+        val topR = 0.16f; val topG = 0.20f; val topB = 0.16f
+        val jeanR = 0.14f; val jeanG = 0.22f; val jeanB = 0.34f
+        val shoeR = 0.90f; val shoeG = 0.91f; val shoeB = 0.93f
+        val hairR = 0.09f; val hairG = 0.08f; val hairB = 0.08f
+
+        // 1. Pelvis / Hips planted solidly on Bullet leather seat (y = 0.89, z = -0.28)
+        drawLocal(dc, base, 0f, 0.91f, -0.28f, 0.34f, 0.18f, 0.24f, 8f, 0f, white, 1f, 1f, jeanR, jeanG, jeanB, 0f, 0.18f, 12f, 0.03f, cube)
+
+        // 2. Torso leaning naturally forward toward the handlebars (~18-24 deg with speed tuck!)
+        val torsoLeanDeg = 18f + speedCrouch * 120f
+        val shY = 1.38f - speedCrouch * 0.65f + breathe
+        val shZ = -0.10f + speedCrouch * 0.95f
+        drawLocal(
+            dc, base,
+            0f, 1.15f - speedCrouch * 0.35f + breathe * 0.5f, -0.20f + speedCrouch * 0.45f,
+            0.38f, 0.50f, 0.22f,
+            torsoLeanDeg, 0f, white, 1f, 1f,
+            topR, topG, topB, 0f, 0.24f, 16f, 0.05f, cube
+        )
+        // Jacket shoulder yoke / hoodie collar
+        drawLocal(dc, base, 0f, shY, shZ - 0.04f, 0.42f, 0.13f, 0.21f, torsoLeanDeg * 0.5f, 0f, white, 1f, 1f, topR * 0.85f, topG * 0.85f, topB * 0.85f, 0f, 0.24f, 16f, 0.05f, cube)
+
+        // 3. Neck + Head + Hair + Beard (level looking ahead, turning subtly into steering!)
+        val headY = shY + 0.19f
+        val headZ = shZ + 0.03f
+        val headYaw = steerDeg * 0.35f
+        drawLocal(dc, base, 0f, shY + 0.07f, shZ + 0.01f, 0.10f, 0.11f, 0.10f, 6f, headYaw, white, 1f, 1f, skinR, skinG, skinB, 0f, 0.18f, 12f, 0.02f, cyl)
+        drawLocal(dc, base, 0f, headY, headZ, 0.20f, 0.23f, 0.21f, 0f, headYaw, white, 1f, 1f, skinR, skinG, skinB, 0f, 0.22f, 14f, 0.03f, sph)
+        // Styled dark hair crown & back fade
+        drawLocal(dc, base, 0f, headY + 0.055f, headZ - 0.015f, 0.21f, 0.15f, 0.22f, -6f, headYaw, white, 1f, 1f, hairR, hairG, hairB, 0f, 0.28f, 18f, 0.05f, sph)
+        // Groomed jawline beard
+        drawLocal(dc, base, 0f, headY - 0.065f, headZ + 0.055f, 0.15f, 0.085f, 0.12f, 0f, headYaw, white, 1f, 1f, hairR, hairG, hairB, 0f, 0.18f, 12f, 0.02f, sph)
+
+        // 4. Legs: Hips -> Knees straddling fuel tank -> Ankles -> Sneakers firmly resting on Footpegs (±0.26, 0.36, 0.04)!
+        val isStopped = kotlin.math.abs(riderSpeed) < 0.45f
+        for (side in floatArrayOf(-1f, 1f)) {
+            val hipX = side * 0.13f
+            val hipY = 0.89f
+            val hipZ = -0.26f
+
+            // When stopped, put left foot slightly out toward ground for balance; when riding, BOTH feet plant on footpegs!
+            val plantGround = isStopped && side < 0f
+            val kneeX = side * (if (plantGround) 0.34f else 0.25f)
+            val kneeY = if (plantGround) 0.56f else 0.67f
+            val kneeZ = if (plantGround) -0.02f else 0.04f
+
+            val ankleX = side * (if (plantGround) 0.38f else 0.26f)
+            val ankleY = if (plantGround) 0.12f else 0.39f
+            val ankleZ = if (plantGround) -0.04f else 0.02f
+
+            // Thigh + Knee cap + Shin
+            drawLimbSegment(dc, base, hipX, hipY, hipZ, kneeX, kneeY, kneeZ, 0.075f, jeanR, jeanG, jeanB)
+            drawLocal(dc, base, kneeX, kneeY, kneeZ, 0.14f, 0.14f, 0.14f, 0f, 0f, white, 1f, 1f, jeanR, jeanG, jeanB, 0f, 0.18f, 12f, 0.03f, sph)
+            drawLimbSegment(dc, base, kneeX, kneeY, kneeZ, ankleX, ankleY, ankleZ, 0.060f, jeanR * 0.92f, jeanG * 0.92f, jeanB * 0.95f)
+
+            // Sneaker resting squarely ON TOP of the chrome footpeg (or ground when stopped)
+            drawLocal(dc, base, ankleX, ankleY - 0.035f, ankleZ + 0.055f, 0.11f, 0.08f, 0.24f, 0f, side * 5f, white, 1f, 1f, shoeR, shoeG, shoeB, 0f, 0.24f, 16f, 0.05f, cube)
+        }
+
+        // 5. Arms: Shoulders -> Elbows -> Wrists -> Hands GRIPPING the exact handlebar grips (±0.36, 1.07, 0.46 ± gripOffZ)!
+        for (side in floatArrayOf(-1f, 1f)) {
+            val shoulderX = side * 0.22f
+            val shoulderY = shY - 0.02f
+            val shoulderZ = shZ
+
+            val handX = side * 0.36f
+            val handY = 1.08f
+            val handZ = 0.46f + side * gripOffZ
+
+            // Natural relaxed bent motorcycle elbow slightly down & outward between shoulder and grip
+            val elbowX = side * 0.33f
+            val elbowY = (shoulderY + handY) * 0.5f - 0.11f
+            val elbowZ = (shoulderZ + handZ) * 0.5f - 0.04f
+
+            // Upper arm (hoodie sleeve) + Elbow + Forearm (sleeve) + Gripping Hand wrapped around bar!
+            drawLimbSegment(dc, base, shoulderX, shoulderY, shoulderZ, elbowX, elbowY, elbowZ, 0.058f, topR, topG, topB)
+            drawLocal(dc, base, elbowX, elbowY, elbowZ, 0.11f, 0.11f, 0.11f, 0f, 0f, white, 1f, 1f, topR, topG, topB, 0f, 0.20f, 12f, 0.03f, sph)
+            drawLimbSegment(dc, base, elbowX, elbowY, elbowZ, handX, handY, handZ, 0.048f, topR * 1.04f, topG * 1.04f, topB * 1.04f)
+            // Hand / knuckles gripping the rubber handlebar grip
+            drawLocal(dc, base, handX, handY, handZ, 0.085f, 0.075f, 0.095f, 0f, 0f, white, 1f, 1f, skinR, skinG, skinB, 0f, 0.22f, 14f, 0.03f, sph)
+        }
+    }
+
+    fun drawBulletBikeShadow(dc: GlDrawContext, bike: BulletBikeProp, groundY: Float = 0f) {
         val white = dc.assets.texWhite
         dc.bindShadowVbo(dc.assets.cubeMesh)
         Matrix.setIdentityM(dc.modelMatrix, 0)
-        Matrix.translateM(dc.modelMatrix, 0, bike.x, 0.56f, bike.z)
+        Matrix.translateM(dc.modelMatrix, 0, bike.x, groundY + 0.56f, bike.z)
         Matrix.rotateM(dc.modelMatrix, 0, bike.yawDeg, 0f, 1f, 0f)
+        if (bike.pitchDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, bike.pitchDeg, 1f, 0f, 0f)
+        if (bike.rollDeg != 0f) Matrix.rotateM(dc.modelMatrix, 0, bike.rollDeg, 0f, 0f, 1f)
         Matrix.scaleM(dc.modelMatrix, 0, 0.52f, 1.02f, 1.98f)
         dc.commitShadow(white, dc.assets.cubeMesh.vertexCount)
     }

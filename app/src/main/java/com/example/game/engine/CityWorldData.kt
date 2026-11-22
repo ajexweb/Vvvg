@@ -395,7 +395,10 @@ data class ParkedCar(
     val r: Float,
     val g: Float,
     val b: Float,
-    var wheelAngleDeg: Float = 0f
+    var wheelAngleDeg: Float = 0f,
+    var pitchDeg: Float = 0f,
+    var rollDeg: Float = 0f,
+    var isPlayerOwned: Boolean = false
 )
 
 data class RoadsideShopProp(
@@ -448,7 +451,7 @@ data class PortContainerProp(
 data class CarAgent(
     var x: Float,
     var z: Float,
-    val axisX: Boolean,
+    var axisX: Boolean,
     val baseSpeed: Float,
     var currentSpeed: Float,
     val minBound: Float,
@@ -457,7 +460,30 @@ data class CarAgent(
     var wheelAngleDeg: Float,
     val r: Float,
     val g: Float,
-    val b: Float
+    val b: Float,
+    var yawDeg: Float = if (axisX) (if (dir > 0f) 90f else -90f) else (if (dir > 0f) 0f else 180f),
+    var targetYawDeg: Float = yawDeg,
+    var roadLaneCoord: Float = if (axisX) z else x,
+    var avoidOffset: Float = 0f,
+    var turnCooldown: Float = 0f,
+    var hornCooldown: Float = 0f,
+    var splineIndex: Int = -1,
+    var splineDist: Float = 0f,
+    var splineDir: Float = 1f,
+    var isPlayerControlled: Boolean = false,
+    var parkedAfterExitTimer: Float = 0f,
+    var pitchDeg: Float = 0f,
+    var rollDeg: Float = 0f,
+    var steerDeg: Float = 0f,
+    var isTurning: Boolean = false,
+    var turnT: Float = 0f,
+    var turnStartX: Float = 0f,
+    var turnStartZ: Float = 0f,
+    var turnCtrlX: Float = 0f,
+    var turnCtrlZ: Float = 0f,
+    var turnEndX: Float = 0f,
+    var turnEndZ: Float = 0f,
+    var lastInterKey: Int = Int.MIN_VALUE
 )
 
 data class NpcAgent(
@@ -478,7 +504,12 @@ data class NpcAgent(
     val hairR: Float, val hairG: Float, val hairB: Float,
     val topR: Float, val topG: Float, val topB: Float,
     val bottomR: Float, val bottomG: Float, val bottomB: Float,
-    val accentR: Float, val accentG: Float, val accentB: Float
+    val accentR: Float, val accentG: Float, val accentB: Float,
+    var headingRad: Float = yawRad,
+    var wanderTimer: Float = 2.5f,
+    var fleeTimer: Float = 0f,
+    var fleeFromX: Float = 0f,
+    var fleeFromZ: Float = 0f
 )
 
 data class CollectibleItem(
@@ -493,7 +524,11 @@ data class BulletBikeProp(
     var z: Float,
     var yawDeg: Float,
     val label: String = "Royal Enfield Bullet 350",
-    var wheelAngleDeg: Float = 0f
+    var wheelAngleDeg: Float = 0f,
+    var pitchDeg: Float = 0f,
+    var rollDeg: Float = 0f,
+    var steerDeg: Float = 0f,
+    var isPlayerOwned: Boolean = false
 )
 
 data class GrassTuftProp(
@@ -547,11 +582,12 @@ data class FlyingBirdAgent(
     val centerX: Float,
     val centerZ: Float,
     val orbitRadius: Float,
-    val altitude: Float,
+    var altitude: Float,
     val angularSpeed: Float,
     var angle: Float,
     var wingPhase: Float,
-    val scale: Float
+    val scale: Float,
+    val baseAltitude: Float = altitude
 )
 
 data class ColonySurfacePad(
@@ -638,11 +674,11 @@ object CityWorldData {
     const val ARMY_BASE_CENTER_X = -348f
     const val ARMY_BASE_CENTER_Z = -248f
 
-    private fun isInsideAirportZone(x: Float, z: Float, pad: Float = 0f): Boolean {
+    fun isInsideAirportZone(x: Float, z: Float, pad: Float = 0f): Boolean {
         return x in (268f - pad)..(442f + pad) && z in (-356f - pad)..(-142f + pad)
     }
 
-    private fun isInsideArmyBaseZone(x: Float, z: Float, pad: Float = 0f): Boolean {
+    fun isInsideArmyBaseZone(x: Float, z: Float, pad: Float = 0f): Boolean {
         return x in (-432f - pad)..(-268f + pad) && z in (-312f - pad)..(-186f + pad)
     }
 
@@ -880,7 +916,20 @@ object CityWorldData {
         CarAgent(-180f, 245.3f, axisX = true, baseSpeed = 11.6f, currentSpeed = 11.6f, minBound = -395f, maxBound = 395f, dir = 1f, wheelAngleDeg = 0f, r = 0.16f, g = 0.52f, b = 0.46f),
         CarAgent( 180f,-245.3f, axisX = true, baseSpeed = 11.8f, currentSpeed = 11.8f, minBound = -240f, maxBound = 240f, dir = -1f, wheelAngleDeg = 0f, r = 0.84f, g = 0.86f, b = 0.88f),
         CarAgent(-160f, 325.3f, axisX = true, baseSpeed = 11.4f, currentSpeed = 11.4f, minBound = -395f, maxBound = 395f, dir = 1f, wheelAngleDeg = 0f, r = 0.24f, g = 0.44f, b = 0.72f),
-        CarAgent( 160f, 330.7f, axisX = true, baseSpeed = 11.4f, currentSpeed = 11.4f, minBound = -395f, maxBound = 395f, dir = -1f, wheelAngleDeg = 0f, r = 0.72f, g = 0.26f, b = 0.22f)
+        CarAgent( 160f, 330.7f, axisX = true, baseSpeed = 11.4f, currentSpeed = 11.4f, minBound = -395f, maxBound = 395f, dir = -1f, wheelAngleDeg = 0f, r = 0.72f, g = 0.26f, b = 0.22f),
+        // Regional 4800m Highway Spline Traffic Cars (Ring Exp, Grand NH-01, Desert Exp, Mountain Ghat, Jungle Hwy, Sea Bridge)
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 15.2f, currentSpeed = 15.2f, minBound = -2300f, maxBound = 2300f, dir = 1f, wheelAngleDeg = 0f, r = 0.88f, g = 0.22f, b = 0.20f, splineIndex = 0, splineDist = 120f, splineDir = 1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 14.8f, currentSpeed = 14.8f, minBound = -2300f, maxBound = 2300f, dir = -1f, wheelAngleDeg = 0f, r = 0.16f, g = 0.48f, b = 0.84f, splineIndex = 0, splineDist = 1450f, splineDir = -1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 15.8f, currentSpeed = 15.8f, minBound = -2300f, maxBound = 2300f, dir = 1f, wheelAngleDeg = 0f, r = 0.90f, g = 0.90f, b = 0.92f, splineIndex = 1, splineDist = 420f, splineDir = 1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 15.0f, currentSpeed = 15.0f, minBound = -2300f, maxBound = 2300f, dir = -1f, wheelAngleDeg = 0f, r = 0.20f, g = 0.24f, b = 0.30f, splineIndex = 1, splineDist = 2600f, splineDir = -1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 16.0f, currentSpeed = 16.0f, minBound = -2300f, maxBound = 2300f, dir = 1f, wheelAngleDeg = 0f, r = 0.90f, g = 0.64f, b = 0.14f, splineIndex = 1, splineDist = 4800f, splineDir = 1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 13.6f, currentSpeed = 13.6f, minBound = -2300f, maxBound = 2300f, dir = 1f, wheelAngleDeg = 0f, r = 0.18f, g = 0.62f, b = 0.42f, splineIndex = 2, splineDist = 280f, splineDir = 1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 13.2f, currentSpeed = 13.2f, minBound = -2300f, maxBound = 2300f, dir = -1f, wheelAngleDeg = 0f, r = 0.80f, g = 0.28f, b = 0.24f, splineIndex = 2, splineDist = 960f, splineDir = -1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 15.5f, currentSpeed = 15.5f, minBound = -2300f, maxBound = 2300f, dir = 1f, wheelAngleDeg = 0f, r = 0.84f, g = 0.84f, b = 0.86f, splineIndex = 3, splineDist = 350f, splineDir = 1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 15.0f, currentSpeed = 15.0f, minBound = -2300f, maxBound = 2300f, dir = -1f, wheelAngleDeg = 0f, r = 0.24f, g = 0.44f, b = 0.72f, splineIndex = 3, splineDist = 1100f, splineDir = -1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 14.2f, currentSpeed = 14.2f, minBound = -2300f, maxBound = 2300f, dir = 1f, wheelAngleDeg = 0f, r = 0.74f, g = 0.44f, b = 0.18f, splineIndex = 4, splineDist = 320f, splineDir = 1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 14.4f, currentSpeed = 14.4f, minBound = -2300f, maxBound = 2300f, dir = 1f, wheelAngleDeg = 0f, r = 0.16f, g = 0.64f, b = 0.72f, splineIndex = 5, splineDist = 260f, splineDir = 1f),
+        CarAgent(0f, -560f, axisX = true, baseSpeed = 14.6f, currentSpeed = 14.6f, minBound = -2300f, maxBound = 2300f, dir = -1f, wheelAngleDeg = 0f, r = 0.86f, g = 0.26f, b = 0.36f, splineIndex = 6, splineDist = 340f, splineDir = 1f)
     )
 
     fun createSkyClouds(): MutableList<SkyCloudProp> = mutableListOf(
@@ -1045,17 +1094,39 @@ object CityWorldData {
             }
         }
 
-        buildings.forEach { chunkAt(it.x, it.z).buildings.add(it) }
-        enterables.forEach { chunkAt(it.centerX, it.centerZ).enterables.add(it) }
-        shops.forEach { chunkAt(it.x, it.z).roadsideShops.add(it) }
+        buildings.forEach { b ->
+            val pad = if (b.hasCompoundWall) 2.0f else 0.8f
+            forEachChunkInBounds(b.x, b.z, b.width * 0.5f + pad, b.depth * 0.5f + pad) { ch ->
+                if (!ch.buildings.contains(b)) ch.buildings.add(b)
+            }
+        }
+        enterables.forEach { eb ->
+            forEachChunkInBounds(eb.centerX, eb.centerZ, eb.halfW + 1.5f, eb.halfD + 1.5f) { ch ->
+                if (!ch.enterables.contains(eb)) ch.enterables.add(eb)
+            }
+        }
+        shops.forEach { s ->
+            forEachChunkInBounds(s.x, s.z, s.width * 0.5f + 1.0f, s.depth * 0.5f + 1.0f) { ch ->
+                if (!ch.roadsideShops.contains(s)) ch.roadsideShops.add(s)
+            }
+        }
         exteriorStaticProps.forEach { chunkAt(it.x, it.z).staticObstacles.add(it) }
-        portContainers.forEach { chunkAt(it.x, it.z).portContainers.add(it) }
+        portContainers.forEach { c ->
+            val hw = maxOf(c.width, c.length) * 0.5f + 0.5f
+            forEachChunkInBounds(c.x, c.z, hw, hw) { ch ->
+                if (!ch.portContainers.contains(c)) ch.portContainers.add(c)
+            }
+        }
         trees.forEach { chunkAt(it.x, it.z).trees.add(it) }
         streetLights.forEach { chunkAt(it.x, it.z).streetLights.add(it) }
         trafficSignals.forEach { chunkAt(it.x, it.z).trafficSignals.add(it) }
         benches.forEach { chunkAt(it.x, it.z).benches.add(it) }
         kiosks.forEach { chunkAt(it.x, it.z).kiosks.add(it) }
-        armyBunkers.forEach { chunkAt(it.x, it.z).armyBunkers.add(it) }
+        armyBunkers.forEach { bk ->
+            forEachChunkInBounds(bk.x, bk.z, bk.width * 0.5f + 0.5f, bk.depth * 0.5f + 0.5f) { ch ->
+                if (!ch.armyBunkers.contains(bk)) ch.armyBunkers.add(bk)
+            }
+        }
         barbedFences.forEach { fn ->
             val hw = if (fn.isVertical) 0.5f else fn.length * 0.5f
             val hd = if (fn.isVertical) fn.length * 0.5f else 0.5f
@@ -1064,7 +1135,11 @@ object CityWorldData {
             }
         }
         helipads.forEach { chunkAt(it.x, it.z).helipads.add(it) }
-        armyVehicles.forEach { chunkAt(it.x, it.z).armyVehicles.add(it) }
+        armyVehicles.forEach { av ->
+            forEachChunkInBounds(av.x, av.z, 3.5f, 3.5f) { ch ->
+                if (!ch.armyVehicles.contains(av)) ch.armyVehicles.add(av)
+            }
+        }
         roadSegments.forEach { chunkAt(it.x, it.z).roadSegments.add(it) }
         intersections.forEach { chunkAt(it.x, it.z).intersections.add(it) }
         colonyPads.forEach { chunkAt(it.x, it.z).colonyPads.add(it) }
@@ -1089,6 +1164,16 @@ object CityWorldData {
         for (shop in activeShops) {
             if (shop.isInsideShop(x, z)) return GroundSurface.INDOOR_TILE
         }
+        // Outside Saini Metro core -> use multi-biome WorldMapData surface classification
+        if (abs(x) > 455f || z < -425f || z > WATERFRONT_Z + 40f) {
+            if (WorldMapData.isOnPavedRoad(x, z)) return GroundSurface.ASPHALT
+            if (WorldMapData.isOnRoad(x, z)) return GroundSurface.DIRT_GRAVEL
+            return when (WorldMapData.getBiomeAt(x, z)) {
+                WorldBiome.THAR_DESERT, WorldBiome.SNOW_PEAKS -> GroundSurface.DIRT_GRAVEL
+                WorldBiome.KONKAN_COAST -> if (WorldMapData.getOceanDistance(x, z) < 42f) GroundSurface.DIRT_GRAVEL else GroundSurface.GRASS
+                else -> GroundSurface.GRASS
+            }
+        }
         // Road + footpath/sidewalk corridors (half-width 5.0m road + 2.2m sidewalk = 7.2m)
         if (!isInsideAirportZone(x, z) && !isInsideArmyBaseZone(x, z)) {
             for (rc in roadCoords) {
@@ -1106,16 +1191,20 @@ object CityWorldData {
         if (z >= WATERFRONT_Z - 7.5f) return GroundSurface.ASPHALT
         // Emerald City Park stays lush grass
         if (isInsideEmeraldPark(x, z)) return GroundSurface.GRASS
+        // Unpaved roadside soil verges right outside footpaths (7.2m..9.0m from main roads)
+        for (rc in roadCoords) {
+            if (abs(x - rc) in 7.21f..9.05f || abs(z - rc) in 7.21f..9.05f) return GroundSurface.DIRT_GRAVEL
+        }
         // Urban dense colony pads & narrow alleys (patli galiyan) -> concrete/asphalt footsteps!
         if (x in -412f..412f && z in -412f..362f) return GroundSurface.ASPHALT
         return GroundSurface.GRASS
     }
 
     /**
-     * Ultra-Fast O(1) Spatial 3D Solid Physics & Collision Solver:
-     * Checks ONLY the 3x3 spatial chunks surrounding (nextX, nextZ) so performance stays locked at 60-120 FPS
-     * across the entire 1km x 1km metropolis, including solid exterior cargo crates, oil drums,
-     * compound walls, buildings, enterables, flush interior furniture, gates, vehicles, and NPCs!
+     * Ultra-Fast O(1) Spatial 3D Solid Physics & Collision Solver across the full 4800m x 4800m Saini State:
+     * - Downtown Saini Metro checks ONLY the 3x3 spatial chunks surrounding (nextX, nextZ)
+     * - Outer multi-biome landmass uses exact WorldMapData terrain height, bridge decks, shore/ocean water barriers,
+     *   and regional landmark colliders!
      */
     fun resolvePlayerPhysics(
         nextX: Float,
@@ -1129,26 +1218,37 @@ object CityWorldData {
         activeBulletBikes: List<BulletBikeProp> = bulletBikes,
         activeShops: List<RoadsideShopProp> = emptyList(),
         ignoreCar: ParkedCar? = null,
+        ignoreAiCar: CarAgent? = null,
         ignoreBike: BulletBikeProp? = null,
-        chunkGrid: Array<Array<WorldChunk>>? = null
+        chunkGrid: Array<Array<WorldChunk>>? = null,
+        prevX: Float = nextX,
+        prevZ: Float = nextZ,
+        isAirborne: Boolean = false,
+        chopperLiftY: Float = 0f
     ): ResolvedPlayerPosition {
-        var x = nextX.coerceIn(-CITY_HALF_EXTENT, CITY_HALF_EXTENT)
-        var z = nextZ.coerceIn(-CITY_HALF_EXTENT, WATERFRONT_Z + 36f) // Walkable out onto Waterfront Pier
+        var x = nextX.coerceIn(-WorldMapData.PLAYABLE_BOUND_X, WorldMapData.PLAYABLE_BOUND_X)
+        var z = nextZ.coerceIn(-WorldMapData.PLAYABLE_BOUND_Z, WorldMapData.PLAYABLE_BOUND_Z)
 
-        // Keep out of ocean water unless on the central wooden Pier (|x| <= 7.2)
-        if (z > WATERFRONT_Z + 1.5f && abs(x) > 6.8f) {
-            z = WATERFRONT_Z + 1.5f
+        // ZERO invisible shoreline or city-perimeter barriers!
+        // Player & vehicles can walk/drive freely off-road in all 360° and enter water (with HUD warning & water physics).
+        var supportY = WorldMapData.getTerrainHeight(x, z)
+
+        // Resolve regional landmark walls & climbable roofs (Saini Garh Fort, Shimla cottages, lighthouses, temples, villages, resorts)
+        WorldTerrainChunkManager.resolveRegionalCollisions(x, z, currentY, playerRadius).let {
+            x = it.first; z = it.second
+            if (it.third > supportY) supportY = it.third
         }
 
-        var supportY = if (z > WATERFRONT_Z && abs(x) <= 7.2f) 0.42f else 0f
+        val inMetroBounds = x in -495f..495f && z in -495f..460f
 
-        // Compute 3x3 chunk neighborhood around player for O(1) static collision queries!
+        // Compute 3x3 chunk neighborhood around player for O(1) static downtown collision queries!
         val minCx = ((x - GRID_MIN) / CHUNK_SIZE).toInt().coerceIn(0, GRID_DIM - 1) - 1
         val maxCx = minCx + 2
         val minCz = ((z - GRID_MIN) / CHUNK_SIZE).toInt().coerceIn(0, GRID_DIM - 1) - 1
         val maxCz = minCz + 2
 
         fun forNearbyChunks(action: (WorldChunk) -> Unit) {
+            if (!inMetroBounds) return
             val grid = chunkGrid ?: return
             for (cx in minCx.coerceAtLeast(0)..maxCx.coerceAtMost(GRID_DIM - 1)) {
                 for (cz in minCz.coerceAtLeast(0)..maxCz.coerceAtMost(GRID_DIM - 1)) {
@@ -1157,36 +1257,71 @@ object CityWorldData {
             }
         }
 
-        // 1. Solid city buildings (skyscrapers, apartments, brick houses + compound walls, factories)
-        //    + Exterior solid cargo crates & oil drums (NO walking inside boxes!)
-        //    + Trees, streetlights, traffic signals, benches, kiosks, port containers, army bunkers, fences, vehicles
+        // Helper: 3D solid AABB that supports jumping & standing cleanly on top (crates, benches, kiosks, containers, roofs, furniture!)
+        fun resolveClimbableBox(cx: Float, cz: Float, hw: Float, hd: Float, topY: Float, bottomY: Float = -50f, stepUpTol: Float = 0.54f) {
+            if (currentY < bottomY - 1.8f) return
+            val dx = x - cx
+            val dz = z - cz
+            val extW = hw + playerRadius
+            val extD = hd + playerRadius
+            if (abs(dx) < extW && abs(dz) < extD) {
+                if (currentY >= topY - stepUpTol) {
+                    if (topY > supportY) supportY = topY
+                } else {
+                    val overlapX = extW - abs(dx)
+                    val overlapZ = extD - abs(dz)
+                    if (overlapX < overlapZ) {
+                        x += if (dx >= 0f) overlapX else -overlapX
+                    } else {
+                        z += if (dz >= 0f) overlapZ else -overlapZ
+                    }
+                }
+            }
+        }
+
+        // Helper: 3D solid Cylinder that supports jumping & standing cleanly on top (oil drums, low pillars)
+        fun resolveClimbableCyl(cx: Float, cz: Float, rad: Float, topY: Float, stepUpTol: Float = 0.54f) {
+            val dx = x - cx
+            val dz = z - cz
+            val minDist = rad + playerRadius
+            val distSq = dx * dx + dz * dz
+            if (distSq < minDist * minDist) {
+                if (currentY >= topY - stepUpTol) {
+                    if (topY > supportY) supportY = topY
+                } else if (distSq > 0.00001f) {
+                    val dist = sqrt(distSq)
+                    x = cx + (dx / dist) * minDist
+                    z = cz + (dz / dist) * minDist
+                }
+            }
+        }
+
+        // 1. Solid city buildings, climbable cargo crates & oil drums, trees, poles, benches, kiosks,
+        //    port shipping containers, army bunkers, fences & army vehicles!
+        //    (NOTE: Grass foliage is intentionally NEVER collided with so player/cars move freely through grass!)
         if (chunkGrid != null) {
             forNearbyChunks { chunk ->
                 for (b in chunk.buildings) {
                     val wallExtra = if (b.hasCompoundWall) 1.50f else 0.32f
                     if (abs(x - b.x) > b.width + 3.5f || abs(z - b.z) > b.depth + 3.5f) continue
-                    pushOutAABB(x, z, b.x, b.z, b.width * 0.5f + wallExtra + playerRadius, b.depth * 0.5f + wallExtra + playerRadius).let {
-                        x = it.first; z = it.second
+                    resolveClimbableBox(b.x, b.z, b.width * 0.5f + wallExtra, b.depth * 0.5f + wallExtra, b.height, stepUpTol = 0.50f)
+                }
+                for (obs in chunk.staticObstacles) {
+                    if (abs(x - obs.x) > obs.halfW + 2.0f || abs(z - obs.z) > obs.halfD + 2.0f) continue
+                    val topY = obs.yFloor + obs.height
+                    if (obs.isOilDrum) {
+                        resolveClimbableCyl(obs.x, obs.z, obs.halfW, topY)
+                    } else {
+                        resolveClimbableBox(obs.x, obs.z, obs.halfW, obs.halfD, topY, bottomY = obs.yFloor)
                     }
                 }
-                if (currentY < 2.4f) {
-                    for (obs in chunk.staticObstacles) {
-                        if (currentY > obs.yFloor + obs.height) continue
-                        if (abs(x - obs.x) > obs.halfW + 2.0f || abs(z - obs.z) > obs.halfD + 2.0f) continue
-                        if (obs.isOilDrum) {
-                            pushOutCircle(x, z, obs.x, obs.z, obs.halfW + playerRadius).let { x = it.first; z = it.second }
-                        } else {
-                            pushOutAABB(x, z, obs.x, obs.z, obs.halfW + playerRadius, obs.halfD + playerRadius).let { x = it.first; z = it.second }
-                        }
-                    }
-                }
-                if (currentY < 3.0f) {
+                if (currentY < 4.5f) {
                     for (t in chunk.trees) {
-                        if (abs(x - t.x) > 2f || abs(z - t.z) > 2f) continue
+                        if (abs(x - t.x) > 2.2f || abs(z - t.z) > 2.2f) continue
                         pushOutCircle(x, z, t.x, t.z, 0.42f * t.scale + playerRadius).let { x = it.first; z = it.second }
                     }
                 }
-                if (currentY < 4.0f) {
+                if (currentY < 5.8f) {
                     for (sl in chunk.streetLights) {
                         if (abs(x - sl.x) > 1.5f || abs(z - sl.z) > 1.5f) continue
                         pushOutCircle(x, z, sl.x, sl.z, 0.22f + playerRadius).let { x = it.first; z = it.second }
@@ -1196,28 +1331,23 @@ object CityWorldData {
                         pushOutCircle(x, z, ts.x, ts.z, 0.26f + playerRadius).let { x = it.first; z = it.second }
                     }
                 }
-                if (currentY < 1.8f) {
-                    for (bn in chunk.benches) {
-                        if (abs(x - bn.x) > 2.5f || abs(z - bn.z) > 2.5f) continue
-                        pushOutAABB(x, z, bn.x, bn.z, 1.05f + playerRadius, 0.52f + playerRadius).let { x = it.first; z = it.second }
-                    }
-                    for (k in chunk.kiosks) {
-                        if (abs(x - k.x) > 3.5f || abs(z - k.z) > 3.5f) continue
-                        pushOutAABB(x, z, k.x, k.z, 1.45f + playerRadius, 1.25f + playerRadius).let { x = it.first; z = it.second }
-                    }
+                for (bn in chunk.benches) {
+                    if (abs(x - bn.x) > 2.5f || abs(z - bn.z) > 2.5f) continue
+                    resolveClimbableBox(bn.x, bn.z, 1.05f, 0.52f, topY = 0.60f)
+                }
+                for (k in chunk.kiosks) {
+                    if (abs(x - k.x) > 3.5f || abs(z - k.z) > 3.5f) continue
+                    resolveClimbableBox(k.x, k.z, 1.45f, 1.25f, topY = 2.46f)
                 }
                 for (c in chunk.portContainers) {
-                    if (currentY > c.y + c.height * 0.5f + 0.4f) continue
                     val hw = if (abs(c.yawDeg) > 45f) c.length * 0.5f else c.width * 0.5f
                     val hd = if (abs(c.yawDeg) > 45f) c.width * 0.5f else c.length * 0.5f
                     if (abs(x - c.x) > hw + 2f || abs(z - c.z) > hd + 2f) continue
-                    pushOutAABB(x, z, c.x, c.z, hw + playerRadius, hd + playerRadius).let { x = it.first; z = it.second }
+                    resolveClimbableBox(c.x, c.z, hw, hd, topY = c.y + c.height * 0.5f, bottomY = c.y - c.height * 0.5f)
                 }
                 for (bk in chunk.armyBunkers) {
                     if (abs(x - bk.x) > bk.width + 2f || abs(z - bk.z) > bk.depth + 2f) continue
-                    pushOutAABB(x, z, bk.x, bk.z, bk.width * 0.5f + playerRadius, bk.depth * 0.5f + playerRadius).let {
-                        x = it.first; z = it.second
-                    }
+                    resolveClimbableBox(bk.x, bk.z, bk.width * 0.5f, bk.depth * 0.5f, topY = bk.height)
                 }
                 if (currentY < 3.4f) {
                     for (fn in chunk.barbedFences) {
@@ -1227,43 +1357,43 @@ object CityWorldData {
                         pushOutAABB(x, z, fn.x, fn.z, hw + playerRadius, hd + playerRadius).let { x = it.first; z = it.second }
                     }
                 }
-                if (currentY < 2.6f) {
-                    for (av in chunk.armyVehicles) {
-                        val hw = if (av.isTruck) 1.55f else 1.25f
-                        val hd = if (av.isTruck) 3.10f else 2.20f
-                        if (abs(x - av.x) > 4.5f || abs(z - av.z) > 4.5f) continue
-                        pushOutAABB(x, z, av.x, av.z, hw + playerRadius, hd + playerRadius).let { x = it.first; z = it.second }
-                    }
+                for (av in chunk.armyVehicles) {
+                    val hw = if (av.isTruck) 1.55f else 1.25f
+                    val hd = if (av.isTruck) 3.10f else 2.20f
+                    val topY = if (av.isTruck) 2.55f else 1.75f
+                    if (abs(x - av.x) > 4.5f || abs(z - av.z) > 4.5f) continue
+                    resolveClimbableBox(av.x, av.z, hw, hd, topY = topY)
                 }
             }
         } else {
-            // Fallback full scan if chunkGrid was omitted
             for (b in buildings) {
                 val wallExtra = if (b.hasCompoundWall) 1.50f else 0.32f
                 if (abs(x - b.x) > b.width + 3.5f || abs(z - b.z) > b.depth + 3.5f) continue
-                pushOutAABB(x, z, b.x, b.z, b.width * 0.5f + wallExtra + playerRadius, b.depth * 0.5f + wallExtra + playerRadius).let {
-                    x = it.first; z = it.second
-                }
+                resolveClimbableBox(b.x, b.z, b.width * 0.5f + wallExtra, b.depth * 0.5f + wallExtra, b.height)
             }
             for (obs in exteriorStaticProps) {
                 if (abs(x - obs.x) > obs.halfW + 2f || abs(z - obs.z) > obs.halfD + 2f) continue
-                pushOutAABB(x, z, obs.x, obs.z, obs.halfW + playerRadius, obs.halfD + playerRadius).let { x = it.first; z = it.second }
+                resolveClimbableBox(obs.x, obs.z, obs.halfW, obs.halfD, obs.yFloor + obs.height)
             }
         }
 
-        // 2. Roadside Shops (dynamic shutter + flush interior desk/crates)
+        // 2. Roadside Shops (dynamic shutter + climbable interior desk/crates + climbable roof!)
         for (shop in activeShops) {
             val hw = shop.width * 0.5f
             val hd = shop.depth * 0.5f
             if (abs(x - shop.x) > hw + 2f || abs(z - shop.z) > hd + 2f) continue
+            val roofY = shop.height + 0.16f
+            if (currentY >= roofY - 0.52f && abs(x - shop.x) < hw + playerRadius && abs(z - shop.z) < hd + playerRadius) {
+                if (roofY > supportY) supportY = roofY
+                continue
+            }
             val wt = 0.26f
             pushOutAABB(x, z, shop.x - hw + wt * 0.5f, shop.z, wt * 0.5f + playerRadius, hd + playerRadius).let { x = it.first; z = it.second }
             pushOutAABB(x, z, shop.x + hw - wt * 0.5f, shop.z, wt * 0.5f + playerRadius, hd + playerRadius).let { x = it.first; z = it.second }
             pushOutAABB(x, z, shop.x, shop.z - shop.facingDirZ * (hd - wt * 0.5f), hw + playerRadius, wt * 0.5f + playerRadius).let { x = it.first; z = it.second }
-            // Shop interior flush desk & crates
             val backInnerZ = shop.z - shop.facingDirZ * (hd - wt - 0.04f)
-            pushOutAABB(x, z, shop.x - 1.15f, backInnerZ + shop.facingDirZ * 0.38f, 0.76f + playerRadius, 0.38f + playerRadius).let { x = it.first; z = it.second }
-            pushOutAABB(x, z, shop.x + 1.85f, backInnerZ + shop.facingDirZ * 0.54f, 0.54f + playerRadius, 0.54f + playerRadius).let { x = it.first; z = it.second }
+            resolveClimbableBox(shop.x - 1.15f, backInnerZ + shop.facingDirZ * 0.38f, 0.76f, 0.38f, topY = 0.96f)
+            resolveClimbableBox(shop.x + 1.85f, backInnerZ + shop.facingDirZ * 0.54f, 0.54f, 0.54f, topY = 1.24f)
             if (shop.gate.isBlocking) {
                 pushOutAABB(x, z, shop.x, shop.frontZ, hw + playerRadius, wt + playerRadius).let { x = it.first; z = it.second }
             }
@@ -1272,51 +1402,62 @@ object CityWorldData {
             }
         }
 
-        // 3. Parked & Moving Cars OBB collision (or climb on top!)
+        // 3. Parked & Moving Cars OBB collision (climb onto hood/trunk/roof smoothly at any terrain elevation!)
         for (pc in activeParkedCars) {
             if (pc === ignoreCar) continue
             if (abs(x - pc.x) > 3.5f || abs(z - pc.z) > 3.5f) continue
+            val carBaseY = WorldMapData.getTerrainHeight(pc.x, pc.z)
             val rad = pc.yawDeg * kotlin.math.PI.toFloat() / 180f
-            val res = resolveCarOBB(x, z, currentY, pc.x, pc.z, cos(rad), sin(rad), playerRadius)
+            val res = resolveCarOBB(x, z, currentY - carBaseY, pc.x, pc.z, cos(rad), sin(rad), playerRadius)
             x = res.first; z = res.second
-            if (res.third > supportY) supportY = res.third
+            if (res.third > 0.01f && carBaseY + res.third > supportY) supportY = carBaseY + res.third
         }
         for (car in movingCars) {
-            if (abs(x - car.x) > 3.5f || abs(z - car.z) > 3.5f) continue
-            val cCos = if (car.axisX) 0f else car.dir
-            val cSin = if (car.axisX) car.dir else 0f
-            val res = resolveCarOBB(x, z, currentY, car.x, car.z, cCos, cSin, playerRadius)
+            if (car === ignoreAiCar) continue
+            if (abs(x - car.x) > 3.8f || abs(z - car.z) > 3.8f) continue
+            val carBaseY = WorldMapData.getTerrainHeight(car.x, car.z)
+            val rad = car.yawDeg * kotlin.math.PI.toFloat() / 180f
+            val res = resolveCarOBB(x, z, currentY - carBaseY, car.x, car.z, cos(rad), sin(rad), playerRadius)
             x = res.first; z = res.second
-            if (res.third > supportY) supportY = res.third
+            if (res.third > 0.01f && carBaseY + res.third > supportY) supportY = carBaseY + res.third
         }
 
         // 4. NPC Pedestrians & Bullet Motorcycles
-        if (currentY < 1.8f) {
-            for (npc in npcs) {
-                if (abs(x - npc.x) > 1.6f || abs(z - npc.z) > 1.6f) continue
+        for (npc in npcs) {
+            if (abs(x - npc.x) > 1.6f || abs(z - npc.z) > 1.6f) continue
+            val npcBaseY = WorldMapData.getTerrainHeight(npc.x, npc.z)
+            if (currentY < npcBaseY + 1.75f) {
                 pushOutCircle(x, z, npc.x, npc.z, 0.36f + playerRadius).let { x = it.first; z = it.second }
             }
         }
-        if (currentY < 1.5f) {
-            for (bike in activeBulletBikes) {
-                if (bike === ignoreBike) continue
-                if (abs(x - bike.x) > 2.4f || abs(z - bike.z) > 2.4f) continue
-                pushOutCircle(x, z, bike.x, bike.z, 0.85f + playerRadius).let { x = it.first; z = it.second }
-            }
+        for (bike in activeBulletBikes) {
+            if (bike === ignoreBike) continue
+            if (abs(x - bike.x) > 2.4f || abs(z - bike.z) > 2.4f) continue
+            val bikeBaseY = WorldMapData.getTerrainHeight(bike.x, bike.z)
+            resolveClimbableCyl(bike.x, bike.z, 0.80f, topY = bikeBaseY + 1.05f, stepUpTol = 0.45f)
         }
 
-        // 5. Airport Control Tower, Hangar & Parked Jetliner
+        // 5. Airport Control Tower, Hangar, Parked Jetliner (fuselage + wings) & Grounded Army Helicopter
         if (abs(x - AIRPORT_TOWER_X) < 6f && abs(z - AIRPORT_TOWER_Z) < 6f) {
             pushOutAABB(x, z, AIRPORT_TOWER_X, AIRPORT_TOWER_Z, 3.6f + playerRadius, 3.6f + playerRadius).let { x = it.first; z = it.second }
         }
         if (abs(x - AIRPORT_HANGAR_X) < 8f && abs(z - AIRPORT_HANGAR_Z) < 10f) {
-            pushOutAABB(x, z, AIRPORT_HANGAR_X, AIRPORT_HANGAR_Z, 5.2f + playerRadius, 7.2f + playerRadius).let { x = it.first; z = it.second }
+            resolveClimbableBox(AIRPORT_HANGAR_X, AIRPORT_HANGAR_Z, 5.2f, 7.2f, topY = 7.4f)
         }
-        if (currentY < 3.6f && abs(x - AIRPORT_JET_X) < 12f && abs(z - AIRPORT_JET_Z) < 14f) {
-            pushOutAABB(x, z, AIRPORT_JET_X, AIRPORT_JET_Z, 2.2f + playerRadius, 9.5f + playerRadius).let { x = it.first; z = it.second }
+        if (abs(x - AIRPORT_JET_X) < 14f && abs(z - AIRPORT_JET_Z) < 14f) {
+            resolveClimbableBox(AIRPORT_JET_X, AIRPORT_JET_Z, 2.2f, 9.5f, topY = 3.5f)
+            resolveClimbableBox(AIRPORT_JET_X, AIRPORT_JET_Z + 0.6f, 11.2f, 2.2f, topY = 2.0f)
+        }
+        if (chopperLiftY < 2.5f && inMetroBounds) {
+            for (hp in helipads) {
+                if (!hp.hasHelicopter) continue
+                if (abs(x - hp.x) < 6.0f && abs(z - hp.z) < 6.0f) {
+                    resolveClimbableBox(hp.x, hp.z, 2.2f, 4.4f, topY = 2.6f)
+                }
+            }
         }
 
-        // 6. Enterable Multi-Floor Buildings: exterior walls, hand-controlled gates, flush interior furniture, and staircases
+        // 6. Enterable Multi-Floor Buildings: exterior walls, hand-controlled gates, climbable interior furniture, and staircases
         var insideBuilding: EnterableBuilding? = null
         var floorNum = 0
 
@@ -1343,23 +1484,10 @@ object CityWorldData {
                 }
             }
 
-            // Ground floor interior living/kitchen partition wall inside Residential House (sofa sits flush against it!)
+            // Ground floor interior living/kitchen partition wall inside Residential House
             if (eb.category == EnterableCategory.RESIDENTIAL_HOUSE && !onSecondFloor) {
                 val partWallZ = eb.centerZ + eb.frontDirSign * 1.78f
                 pushOutAABB(x, z, eb.centerX - 4.15f, partWallZ, 2.30f + playerRadius, 0.14f + playerRadius).let { x = it.first; z = it.second }
-            }
-
-            // Solid AABB colliders for EVERY piece of flush multi-angle furniture on the active floor
-            val activeFloor = if (onSecondFloor) 2 else 1
-            for (item in eb.furnitureItems) {
-                if (item.floorIdx != activeFloor || item.yOffset > 0.4f) continue
-                pushOutAABB(
-                    x, z,
-                    eb.centerX + item.localX,
-                    eb.centerZ + item.localZ,
-                    item.halfW + playerRadius,
-                    item.halfD + playerRadius
-                ).let { x = it.first; z = it.second }
             }
 
             if (eb.isInsideFootprint(x, z, margin = 0.25f)) {
@@ -1378,9 +1506,252 @@ object CityWorldData {
                     floorNum = 1
                 }
             }
+
+            // Solid 3D climbable colliders for EVERY piece of flush interior furniture (jump onto beds, sofas, desks, crates!)
+            val activeFloor = if (onSecondFloor) 2 else 1
+            val floorBaseY = if (onSecondFloor) (eb.floorHeight + 0.16f) else 0.16f
+            for (item in eb.furnitureItems) {
+                if (item.floorIdx != activeFloor || item.yOffset > 0.4f) continue
+                val furnHeight = when (item.kind) {
+                    FurnitureKind.KING_BED -> 0.62f
+                    FurnitureKind.MODERN_SOFA -> 0.56f
+                    FurnitureKind.TV_UNIT -> 0.64f
+                    FurnitureKind.OFFICE_DESK_PC -> 0.78f
+                    FurnitureKind.KITCHEN_COUNTER -> 0.92f
+                    FurnitureKind.CARGO_CRATE -> item.propSize
+                    FurnitureKind.OIL_DRUM -> 1.05f
+                    FurnitureKind.FACTORY_CNC -> 1.78f
+                    FurnitureKind.REFRIGERATOR -> 1.96f
+                    FurnitureKind.WOODEN_WARDROBE -> 2.12f
+                }
+                resolveClimbableBox(
+                    eb.centerX + item.localX,
+                    eb.centerZ + item.localZ,
+                    item.halfW,
+                    item.halfD,
+                    topY = floorBaseY + furnHeight,
+                    bottomY = floorBaseY
+                )
+            }
         }
 
         return ResolvedPlayerPosition(x, z, supportY, insideBuilding, floorNum)
+    }
+
+    /**
+     * Fast solid-object collision check specifically for AI traffic vehicles:
+     * prevents AI cars from EVER driving through buildings, enterables, shops, regional dhabas/hotels/garages,
+     * petrol pumps, trees, army base fences, containers, or deep water off bridges!
+     */
+    fun isVehicleSolidBlocked(
+        x: Float,
+        z: Float,
+        carRadius: Float,
+        chunkGrid: Array<Array<WorldChunk>>,
+        enterables: List<EnterableBuilding>,
+        activeShops: List<RoadsideShopProp>
+    ): Boolean {
+        if (abs(x) > WorldMapData.PLAYABLE_BOUND_X - 20f || abs(z) > WorldMapData.PLAYABLE_BOUND_Z - 20f) return true
+        if (!WorldMapData.isOnBridge(x, z) && WorldMapData.getWaterDepth(x, z) > 0.65f) return true
+        if (WorldTerrainChunkManager.isRegionalBlocked(x, z, carRadius)) return true
+
+        if (x in -490f..490f && z in -490f..450f) {
+            val ix = ((x - GRID_MIN) / CHUNK_SIZE).toInt().coerceIn(0, GRID_DIM - 1)
+            val iz = ((z - GRID_MIN) / CHUNK_SIZE).toInt().coerceIn(0, GRID_DIM - 1)
+            for (cx in (ix - 1).coerceAtLeast(0)..(ix + 1).coerceAtMost(GRID_DIM - 1)) {
+                for (cz in (iz - 1).coerceAtLeast(0)..(iz + 1).coerceAtMost(GRID_DIM - 1)) {
+                    val ch = chunkGrid[cx][cz]
+                    for (b in ch.buildings) {
+                        val extra = if (b.hasCompoundWall) 1.45f else 0.30f
+                        if (abs(x - b.x) < b.width * 0.5f + extra + carRadius && abs(z - b.z) < b.depth * 0.5f + extra + carRadius) return true
+                    }
+                    for (obs in ch.staticObstacles) {
+                        if (abs(x - obs.x) < obs.halfW + carRadius && abs(z - obs.z) < obs.halfD + carRadius) return true
+                    }
+                    for (t in ch.trees) {
+                        val dx = x - t.x; val dz = z - t.z
+                        val r = 0.48f * t.scale + carRadius
+                        if (dx * dx + dz * dz < r * r) return true
+                    }
+                    for (c in ch.portContainers) {
+                        val hw = if (abs(c.yawDeg) > 45f) c.length * 0.5f else c.width * 0.5f
+                        val hd = if (abs(c.yawDeg) > 45f) c.width * 0.5f else c.length * 0.5f
+                        if (abs(x - c.x) < hw + carRadius && abs(z - c.z) < hd + carRadius) return true
+                    }
+                    for (bk in ch.armyBunkers) {
+                        if (abs(x - bk.x) < bk.width * 0.5f + carRadius && abs(z - bk.z) < bk.depth * 0.5f + carRadius) return true
+                    }
+                }
+            }
+            for (eb in enterables) {
+                if (abs(x - eb.centerX) < eb.halfW + carRadius && abs(z - eb.centerZ) < eb.halfD + carRadius) return true
+            }
+            for (shop in activeShops) {
+                if (abs(x - shop.x) < shop.width * 0.5f + carRadius && abs(z - shop.z) < shop.depth * 0.5f + carRadius) return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Solid 3D obstacle check for autonomous NPC pedestrians ("baaki ke log") so NPCs NEVER walk through
+     * buildings, walls, closed gates, cargo boxes, benches, trees, parked/moving cars, or water!
+     * Grass foliage is intentionally excluded (100% pass-through).
+     */
+    fun isNpcBlocked(
+        x: Float,
+        z: Float,
+        npcRadius: Float = 0.44f,
+        chunkGrid: Array<Array<WorldChunk>>,
+        enterables: List<EnterableBuilding>,
+        activeShops: List<RoadsideShopProp>,
+        activeParkedCars: List<ParkedCar>,
+        movingCars: List<CarAgent>,
+        activeBulletBikes: List<BulletBikeProp>
+    ): Boolean {
+        if (abs(x) > WorldMapData.PLAYABLE_BOUND_X - 10f || abs(z) > WorldMapData.PLAYABLE_BOUND_Z - 10f) return true
+        if (WorldMapData.getWaterDepth(x, z) > 0.35f) return true
+        if (WorldTerrainChunkManager.isRegionalBlocked(x, z, npcRadius)) return true
+
+        // 1. Downtown chunk-indexed solid obstacles (buildings, crates, trees, poles, benches, kiosks, containers, army base!)
+        if (x in -490f..490f && z in -490f..450f) {
+            val ix = ((x - GRID_MIN) / CHUNK_SIZE).toInt().coerceIn(0, GRID_DIM - 1)
+            val iz = ((z - GRID_MIN) / CHUNK_SIZE).toInt().coerceIn(0, GRID_DIM - 1)
+            for (cx in (ix - 1).coerceAtLeast(0)..(ix + 1).coerceAtMost(GRID_DIM - 1)) {
+                for (cz in (iz - 1).coerceAtLeast(0)..(iz + 1).coerceAtMost(GRID_DIM - 1)) {
+                    val ch = chunkGrid[cx][cz]
+                    for (b in ch.buildings) {
+                        val extra = if (b.hasCompoundWall) 1.55f else 0.38f
+                        if (abs(x - b.x) < b.width * 0.5f + extra + npcRadius && abs(z - b.z) < b.depth * 0.5f + extra + npcRadius) return true
+                    }
+                    for (obs in ch.staticObstacles) {
+                        if (abs(x - obs.x) < obs.halfW + npcRadius && abs(z - obs.z) < obs.halfD + npcRadius) return true
+                    }
+                    for (t in ch.trees) {
+                        val dx = x - t.x; val dz = z - t.z
+                        val r = 0.46f * t.scale + npcRadius
+                        if (dx * dx + dz * dz < r * r) return true
+                    }
+                    for (sl in ch.streetLights) {
+                        val dx = x - sl.x; val dz = z - sl.z
+                        val r = 0.28f + npcRadius
+                        if (dx * dx + dz * dz < r * r) return true
+                    }
+                    for (ts in ch.trafficSignals) {
+                        val dx = x - ts.x; val dz = z - ts.z
+                        val r = 0.30f + npcRadius
+                        if (dx * dx + dz * dz < r * r) return true
+                    }
+                    for (bn in ch.benches) {
+                        if (abs(x - bn.x) < 1.08f + npcRadius && abs(z - bn.z) < 0.56f + npcRadius) return true
+                    }
+                    for (k in ch.kiosks) {
+                        if (abs(x - k.x) < 1.50f + npcRadius && abs(z - k.z) < 1.30f + npcRadius) return true
+                    }
+                    for (c in ch.portContainers) {
+                        val hw = if (abs(c.yawDeg) > 45f) c.length * 0.5f else c.width * 0.5f
+                        val hd = if (abs(c.yawDeg) > 45f) c.width * 0.5f else c.length * 0.5f
+                        if (abs(x - c.x) < hw + npcRadius && abs(z - c.z) < hd + npcRadius) return true
+                    }
+                    for (bk in ch.armyBunkers) {
+                        if (abs(x - bk.x) < bk.width * 0.5f + npcRadius && abs(z - bk.z) < bk.depth * 0.5f + npcRadius) return true
+                    }
+                    for (fn in ch.barbedFences) {
+                        val hw = if (fn.isVertical) 0.30f else fn.length * 0.5f
+                        val hd = if (fn.isVertical) fn.length * 0.5f else 0.30f
+                        if (abs(x - fn.x) < hw + npcRadius && abs(z - fn.z) < hd + npcRadius) return true
+                    }
+                    for (av in ch.armyVehicles) {
+                        val hw = if (av.isTruck) 1.60f else 1.30f
+                        val hd = if (av.isTruck) 3.15f else 2.25f
+                        if (abs(x - av.x) < hw + npcRadius && abs(z - av.z) < hd + npcRadius) return true
+                    }
+                }
+            }
+            if (abs(x - AIRPORT_TOWER_X) < 3.8f + npcRadius && abs(z - AIRPORT_TOWER_Z) < 3.8f + npcRadius) return true
+            if (abs(x - AIRPORT_HANGAR_X) < 5.4f + npcRadius && abs(z - AIRPORT_HANGAR_Z) < 7.4f + npcRadius) return true
+            if (abs(x - AIRPORT_JET_X) < 11.4f + npcRadius && abs(z - AIRPORT_JET_Z) < 9.7f + npcRadius) return true
+        }
+        // 2. Enterable buildings & shops
+        for (eb in enterables) {
+            if (abs(x - eb.centerX) < eb.halfW + 0.15f + npcRadius && abs(z - eb.centerZ) < eb.halfD + 0.15f + npcRadius) return true
+        }
+        for (shop in activeShops) {
+            if (abs(x - shop.x) < shop.width * 0.5f + 0.15f + npcRadius && abs(z - shop.z) < shop.depth * 0.5f + 0.15f + npcRadius) return true
+        }
+        // 3. Parked cars, moving traffic cars (rotated OBB!) & Bullet motorcycles
+        for (pc in activeParkedCars) {
+            val dx = x - pc.x; val dz = z - pc.z
+            if (abs(dx) > 3.4f || abs(dz) > 3.4f) continue
+            val rad = pc.yawDeg * kotlin.math.PI.toFloat() / 180f
+            val fX = sin(rad); val fZ = cos(rad)
+            val localZ = dx * fX + dz * fZ
+            val localX = dx * fZ - dz * fX
+            if (abs(localX) < 1.15f + npcRadius && abs(localZ) < 2.38f + npcRadius) return true
+        }
+        for (car in movingCars) {
+            val dx = x - car.x; val dz = z - car.z
+            if (abs(dx) > 3.6f || abs(dz) > 3.6f) continue
+            val rad = car.yawDeg * kotlin.math.PI.toFloat() / 180f
+            val fX = sin(rad); val fZ = cos(rad)
+            val localZ = dx * fX + dz * fZ
+            val localX = dx * fZ - dz * fX
+            if (abs(localX) < 1.20f + npcRadius && abs(localZ) < 2.45f + npcRadius) return true
+        }
+        for (bike in activeBulletBikes) {
+            val dx = x - bike.x; val dz = z - bike.z
+            val r = 0.92f + npcRadius
+            if (dx * dx + dz * dz < r * r) return true
+        }
+        return false
+    }
+
+    /**
+     * Returns the highest solid structure/terrain ceiling directly underneath or within [radius]
+     * of (x, z) so flying birds smoothly soar OVER skyscrapers, towers, landmarks, and snow peaks
+     * and NEVER clip through buildings or mountains!
+     */
+    fun getMaxObstacleHeightAt(
+        x: Float,
+        z: Float,
+        radius: Float = 3.5f,
+        chunkGrid: Array<Array<WorldChunk>>,
+        enterables: List<EnterableBuilding>
+    ): Float {
+        var maxTop = WorldMapData.getTerrainHeight(x, z)
+        val regTop = WorldTerrainChunkManager.getMaxRegionalObstacleHeightAt(x, z, radius)
+        if (regTop > maxTop) maxTop = regTop
+
+        if (x in -495f..495f && z in -495f..460f) {
+            val ix = ((x - GRID_MIN) / CHUNK_SIZE).toInt().coerceIn(0, GRID_DIM - 1)
+            val iz = ((z - GRID_MIN) / CHUNK_SIZE).toInt().coerceIn(0, GRID_DIM - 1)
+            for (cx in (ix - 1).coerceAtLeast(0)..(ix + 1).coerceAtMost(GRID_DIM - 1)) {
+                for (cz in (iz - 1).coerceAtLeast(0)..(iz + 1).coerceAtMost(GRID_DIM - 1)) {
+                    val ch = chunkGrid[cx][cz]
+                    for (b in ch.buildings) {
+                        if (abs(x - b.x) < b.width * 0.5f + radius && abs(z - b.z) < b.depth * 0.5f + radius) {
+                            if (b.height > maxTop) maxTop = b.height
+                        }
+                    }
+                    for (t in ch.trees) {
+                        if (abs(x - t.x) < 2.8f * t.scale + radius && abs(z - t.z) < 2.8f * t.scale + radius) {
+                            val treeTop = 6.5f * t.scale
+                            if (treeTop > maxTop) maxTop = treeTop
+                        }
+                    }
+                }
+            }
+            for (eb in enterables) {
+                if (abs(x - eb.centerX) < eb.halfW + radius && abs(z - eb.centerZ) < eb.halfD + radius) {
+                    val ebTop = if (eb.hasSecondFloor) eb.floorHeight * 2f + 2.5f else eb.floorHeight + 2.5f
+                    if (ebTop > maxTop) maxTop = ebTop
+                }
+            }
+            if (abs(x - AIRPORT_TOWER_X) < 5.5f + radius && abs(z - AIRPORT_TOWER_Z) < 5.5f + radius) {
+                if (18.5f > maxTop) maxTop = 18.5f
+            }
+        }
+        return maxTop
     }
 
     private fun resolveCarOBB(
@@ -1397,7 +1768,10 @@ object CityWorldData {
         val halfL = 2.28f + playerRadius
 
         if (abs(localX) < halfW && abs(localZ) < halfL) {
-            if (py >= 1.25f) return Triple(px, pz, 1.48f)
+            // Two-tier climbable car geometry: jump onto hood/trunk (~0.95m) or roof (~1.48m)!
+            val onHoodOrTrunk = abs(localZ) > 0.95f
+            val targetTop = if (onHoodOrTrunk) 0.96f else 1.48f
+            if (py >= targetTop - 0.52f) return Triple(px, pz, targetTop)
             val overlapX = halfW - abs(localX)
             val overlapZ = halfL - abs(localZ)
             var adjLocalX = localX
@@ -1552,16 +1926,20 @@ object CityWorldData {
                 if (isInsideEmeraldPark(midX, midZ)) continue
                 if (midZ > 356f) continue
 
-                // Paved urban colony ground pad so blocks look like real GTA neighborhoods instead of bare grass
+                // Paved urban colony ground pad inset by 1.75m from footpaths, leaving natural unpaved
+                // roadside soil/mitti verges (7.12m..8.87m from road center) for organic roadside grass tufts!
                 val isDowntownOrResidential = abs(midX) < 180f || midX < -104f
-                pads.add(
-                    ColonySurfacePad(
-                        x = midX, z = midZ,
-                        width = blockW - 0.12f,
-                        depth = blockD - 0.12f,
-                        isPaverCourtyard = isDowntownOrResidential && ((bx + bz) % 2 == 0)
+                val vergeInset = 3.50f
+                if (blockW > vergeInset + 8f && blockD > vergeInset + 8f) {
+                    pads.add(
+                        ColonySurfacePad(
+                            x = midX, z = midZ,
+                            width = blockW - vergeInset,
+                            depth = blockD - vergeInset,
+                            isPaverCourtyard = isDowntownOrResidential && ((bx + bz) % 2 == 0)
+                        )
                     )
-                )
+                }
 
                 // Narrow paved colony alleys ("patli galiyan") cutting cleanly through the colony block
                 val alleyW = 4.4f
@@ -1998,7 +2376,17 @@ object CityWorldData {
         ParkedCar( 292f, -248f,  90f, 0.86f, 0.72f, 0.18f),
         // South Waterfront Promenade
         ParkedCar(  16f,  398f,  90f, 0.18f, 0.60f, 0.44f),
-        ParkedCar( -82f,  398f, -90f, 0.78f, 0.24f, 0.28f)
+        ParkedCar( -82f,  398f, -90f, 0.78f, 0.24f, 0.28f),
+        // Regional Saini State Vehicles across all 7 Biomes (Highways, Desert, Mountains, Jungle, Beaches & Islands!)
+        ParkedCar(  180f, -1404f,  90f, 0.90f, 0.92f, 0.96f), // Shimla Mall Road
+        ParkedCar( -240f,  -736f,   0f, 0.84f, 0.22f, 0.24f), // Gram Chaupal Village
+        ParkedCar( -840f,   -42f,  90f, 0.88f, 0.62f, 0.16f), // Rajputana Highway Dhaba
+        ParkedCar(-1520f,  -372f,   0f, 0.18f, 0.46f, 0.78f), // Saini Garh Fort Gate
+        ParkedCar(-1280f,    60f,  90f, 0.94f, 0.20f, 0.22f), // Thar Salt-Flat Speedway
+        ParkedCar(  890f,  -176f,  90f, 0.20f, 0.56f, 0.34f), // Forest Ranger Checkpost
+        ParkedCar(-1010f,   625f,  90f, 0.14f, 0.74f, 0.82f), // Goa Sunset Beach Shacks
+        ParkedCar(  175f,   938f, 180f, 0.95f, 0.94f, 0.92f), // Saini Luxury Resort Island
+        ParkedCar(  345f,  1825f, -90f, 0.20f, 0.22f, 0.26f)  // Hidden Smuggler Cove
     )
 
     private fun buildBulletBikes(): List<BulletBikeProp> = listOf(
@@ -2012,42 +2400,177 @@ object CityWorldData {
         BulletBikeProp( 198.0f,  112.0f,  90f, "Factory Express Bullet 350"),
         BulletBikeProp(-262.0f, -248.0f,  90f, "Army Dispatch Bullet 500"),
         BulletBikeProp( 298.0f, -238.0f, -90f, "Airport Patrol Bullet 350"),
-        BulletBikeProp( -12.0f,  401.5f,  15f, "Boardwalk Cruiser Bullet")
+        BulletBikeProp( -12.0f,  401.5f,  15f, "Boardwalk Cruiser Bullet"),
+        // Regional Royal Enfield Bullet 350s stationed across Saini State!
+        BulletBikeProp(  36.0f,  402.0f, 180f, "Overseas Bridge Cruiser Bullet 350"),
+        BulletBikeProp( 190.0f, -1406f, -90f, "Himalayan Ghat Bullet 500"),
+        BulletBikeProp(-205.0f, -1825f,  45f, "Snow Summit Expedition Bullet"),
+        BulletBikeProp(-1508f,  -372f, -30f, "Saini Garh Desert Bullet 350"),
+        BulletBikeProp(-1035f,  -195f,  90f, "Thar Oasis Bullet 500"),
+        BulletBikeProp( 898.0f,  -178f,  90f, "Forest Ranger Trail Bullet 350"),
+        BulletBikeProp( 1608f,  -548f, -45f, "Jungle Ruins Scrambler Bullet"),
+        BulletBikeProp(-1000f,   628f,  60f, "Goa Coastal Bullet 350"),
+        BulletBikeProp( 186.0f,   942f, 160f, "Resort Island Bullet 350"),
+        BulletBikeProp(-255.0f,  1450f,  30f, "Lighthouse Key Patrol Bullet")
     )
 
-    private fun buildGrassTufts(): List<GrassTuftProp> {
-        val list = mutableListOf<GrassTuftProp>()
-        var seed = 10
-        // Around park & nearby boulevard trees
-        for (i in trees.indices) {
-            val t = trees[i]
-            val offsets = arrayOf(floatArrayOf(1.1f, 0.9f), floatArrayOf(-1.2f, 0.7f))
-            for (o in offsets) {
-                seed++
-                val gx = t.x + o[0]
-                val gz = t.z + o[1]
-                if (isClearForProp(gx, gz, radius = 0.6f, checkVehicles = true)) {
-                    list.add(GrassTuftProp(gx, gz, 0.78f + (seed % 4) * 0.14f, (seed * 37f) % 180f, seed))
-                }
+    /**
+     * Strict placement & exclusion validator for the 10-PNG GTA-6 3D Instanced Grass System.
+     * Guarantees ZERO grass ever spawns on roads, intersections, footpaths (+0.35m margin),
+     * colony alleys, hard concrete pads/plazas, buildings/interiors (+0.55m..0.65m padding),
+     * water, boardwalks, docks, airport tarmac, army concrete base, desert dunes, snow, or vehicles.
+     */
+    fun getGrassZoneType(x: Float, z: Float): GrassZoneType {
+        // Outside Saini Metro Downtown core -> biome-driven wild grass rules
+        if (abs(x) > CITY_HALF_EXTENT - 6f || z < -CITY_HALF_EXTENT + 6f || z > WATERFRONT_Z + 12f) {
+            if (WorldMapData.isWater(x, z) || WorldMapData.isOnRoad(x, z)) return GrassZoneType.NONE
+            if (WorldMapData.getDistanceToRoad(x, z) < 9.5f) return GrassZoneType.NONE
+            val h = WorldMapData.getTerrainHeight(x, z)
+            if (h < 0.45f || h > 54f) return GrassZoneType.NONE
+            return when (WorldMapData.getBiomeAt(x, z)) {
+                WorldBiome.VILLAGE_PLAINS, WorldBiome.JUNGLE_RIVER, WorldBiome.SAINI_KEYS -> GrassZoneType.WILD
+                WorldBiome.KONKAN_COAST -> if (WorldMapData.getOceanDistance(x, z) > 36f) GrassZoneType.WILD else GrassZoneType.NONE
+                else -> GrassZoneType.NONE
             }
         }
-        // Lush wild grass patches inside Emerald City Park (-94..-58, 58..94)
-        var gx = -92f
-        while (gx <= -60f) {
-            var gz = 60f
-            while (gz <= 92f) {
-                seed++
-                val jx = ((seed * 19) % 11 - 5) * 0.35f
-                val jz = ((seed * 29) % 11 - 5) * 0.35f
-                if (isClearForProp(gx + jx, gz + jz, radius = 0.6f, checkVehicles = true)) {
-                    list.add(GrassTuftProp(gx + jx, gz + jz, 0.85f + (seed % 5) * 0.14f, (seed * 53f) % 180f, seed))
-                }
-                gz += 6.5f
-            }
-            gx += 6.5f
+        // 1. Waterfront beach & boardwalk exclusion inside Metro
+        if (z > WATERFRONT_Z - 7.0f) {
+            return GrassZoneType.NONE
         }
-        return list
+
+        // 2. Port Container concrete dock yards
+        if (z > 366f && (x in 66f..214f || x in -174f..-66f)) return GrassZoneType.NONE
+
+        // 3. Airport concrete runway, apron, ATC tower & hangar (allow wild grass ONLY on outer airfield dirt!)
+        if (x in 326f..376f && z in -346f..-154f) return GrassZoneType.NONE
+        if (abs(x - AIRPORT_TOWER_X) < 8.5f && abs(z - AIRPORT_TOWER_Z) < 8.5f) return GrassZoneType.NONE
+        if (abs(x - AIRPORT_HANGAR_X) < 13.5f && abs(z - AIRPORT_HANGAR_Z) < 15.5f) return GrassZoneType.NONE
+
+        // 4. Army Base concrete compound pad (allow wild grass outside perimeter barbed fence!)
+        if (x in -411f..-285f && z in -297f..-199f) return GrassZoneType.NONE
+
+        // 5. Roads, Intersections & Footpaths + 0.35m safety margin (5.0m halfRoad + 2.12m footpath + 0.35m = 7.47m)
+        var minRoadDist = Float.MAX_VALUE
+        if (!isInsideAirportZone(x, z) && !isInsideArmyBaseZone(x, z)) {
+            for (rc in roadCoords) {
+                val dx = abs(x - rc)
+                val dz = abs(z - rc)
+                if (dx < 7.47f || dz < 7.47f) return GrassZoneType.NONE
+                if (dx < minRoadDist) minRoadDist = dx
+                if (dz < minRoadDist) minRoadDist = dz
+            }
+        }
+
+        // 6. Narrow paved colony alleys ("patli galiyan") + 0.45m safety margin
+        for (al in colonyAlleys) {
+            val hw = if (al.isVertical) al.width * 0.5f + 0.45f else al.length * 0.5f + 0.35f
+            val hd = if (al.isVertical) al.length * 0.5f + 0.35f else al.width * 0.5f + 0.45f
+            if (abs(x - al.x) < hw && abs(z - al.z) < hd) return GrassZoneType.NONE
+        }
+
+        // 7. Enterable Buildings & Doorway Aprons (+0.65m wall padding, +1.4m front entrance clearance)
+        for (eb in enterableFootprints) {
+            val frontExtra = if ((z - eb.centerZ) * eb.frontDirSign > 0f) 1.40f else 0.65f
+            if (abs(x - eb.centerX) < eb.halfW + 0.65f && abs(z - eb.centerZ) < eb.halfD + frontExtra) {
+                return GrassZoneType.NONE
+            }
+        }
+
+        // 8. Roadside Shops (+0.65m padding + front entrance apron)
+        for (shop in shopFootprints) {
+            val frontExtra = if ((z - shop.z) * shop.facingDirZ > 0f) 1.30f else 0.65f
+            if (abs(x - shop.x) < shop.width * 0.5f + 0.65f && abs(z - shop.z) < shop.depth * 0.5f + frontExtra) {
+                return GrassZoneType.NONE
+            }
+        }
+
+        // 9. All City Buildings (+0.60m wall padding; +1.85m when compound wall encloses yard)
+        for (b in buildings) {
+            val pad = if (b.hasCompoundWall) 1.85f else 0.60f
+            if (abs(x - b.x) < b.width * 0.5f + pad && abs(z - b.z) < b.depth * 0.5f + pad) {
+                return GrassZoneType.NONE
+            }
+        }
+
+        // 10. Hard concrete/paver colony courtyards (ZERO grass inside paved urban plazas!)
+        for (pad in colonyPads) {
+            if (abs(x - pad.x) < pad.width * 0.5f + 0.10f && abs(z - pad.z) < pad.depth * 0.5f + 0.10f) {
+                return GrassZoneType.NONE
+            }
+        }
+
+        // 11. Solid Exterior Crates, Oil Drums, Port Containers, Helipads, Bunkers, Kiosks, Benches, Vehicles
+        for (obs in exteriorStaticProps) {
+            if (abs(x - obs.x) < obs.halfW + 0.55f && abs(z - obs.z) < obs.halfD + 0.55f) return GrassZoneType.NONE
+        }
+        for (c in portContainers) {
+            val hw = if (abs(c.yawDeg) > 45f) c.length * 0.5f else c.width * 0.5f
+            val hd = if (abs(c.yawDeg) > 45f) c.width * 0.5f else c.length * 0.5f
+            if (abs(x - c.x) < hw + 0.65f && abs(z - c.z) < hd + 0.65f) return GrassZoneType.NONE
+        }
+        for (hp in helipads) {
+            if (abs(x - hp.x) < hp.size * 0.55f + 0.7f && abs(z - hp.z) < hp.size * 0.55f + 0.7f) return GrassZoneType.NONE
+        }
+        for (bk in armyBunkers) {
+            if (abs(x - bk.x) < bk.width * 0.5f + 0.85f && abs(z - bk.z) < bk.depth * 0.5f + 0.85f) return GrassZoneType.NONE
+        }
+        for (k in kiosks) {
+            if (abs(x - k.x) < 1.85f && abs(z - k.z) < 1.65f) return GrassZoneType.NONE
+        }
+        for (bn in benches) {
+            // Exclude bench base itself while allowing grass right up to bench edges
+            if (abs(x - bn.x) < 1.05f && abs(z - bn.z) < 0.55f) return GrassZoneType.NONE
+        }
+        for (pc in parkedCars) {
+            val dx = x - pc.x; val dz = z - pc.z
+            if (dx * dx + dz * dz < 2.25f * 2.25f) return GrassZoneType.NONE
+        }
+        for (bike in bulletBikes) {
+            val dx = x - bike.x; val dz = z - bike.z
+            if (dx * dx + dz * dz < 1.45f * 1.45f) return GrassZoneType.NONE
+        }
+        // Keep grass out of the solid core of tree trunks (0.42m trunk radius) while lush right around base!
+        for (t in trees) {
+            val dx = x - t.x; val dz = z - t.z
+            if (dx * dx + dz * dz < 0.42f * 0.42f) return GrassZoneType.NONE
+        }
+
+        // --- ALLOWED REALISTIC GRASS ZONES ---
+        // Zone 1: Parks & Gardens (Emerald City Park)
+        if (isInsideEmeraldPark(x, z)) return GrassZoneType.PARK
+
+        // Zone 2: Roadside Soil / Dirt Verges directly outside footpaths (7.47m..9.15m from main roads)
+        if (minRoadDist in 7.47f..9.15f) return GrassZoneType.ROADSIDE_SOIL
+
+        // Zone 3: Open Dirt Plots, Outer Airfield/Base Meadows, & City Outskirts Wild Terrain
+        return GrassZoneType.WILD
     }
+
+    fun isNearTreeTrunk(x: Float, z: Float, radius: Float): Boolean {
+        val rSq = radius * radius
+        for (t in trees) {
+            val dx = x - t.x; val dz = z - t.z
+            if (dx * dx + dz * dz < rSq) return true
+        }
+        return false
+    }
+
+    /**
+     * Returns true inside parks near tree trunks, bench edges, or park perimeter edges
+     * so slightly taller blades (08, 09) accent those edges naturally.
+     */
+    fun isNearParkAccentFeature(x: Float, z: Float): Boolean {
+        if (x < -93.8f || x > -58.2f || z < 58.2f || z > 93.8f) return true
+        if (isNearTreeTrunk(x, z, 2.35f)) return true
+        for (bn in benches) {
+            val dx = x - bn.x; val dz = z - bn.z
+            if (dx * dx + dz * dz < 2.1f * 2.1f) return true
+        }
+        return false
+    }
+
+    // Legacy crossed-quad grass tufts replaced by RealisticGrassSystem (10-PNG GPU chunk-batched blades)
+    private fun buildGrassTufts(): List<GrassTuftProp> = emptyList()
 
     private fun buildArmyBunkers(): List<ArmyBunkerProp> = listOf(
         ArmyBunkerProp(x = -384f, z = -268f, width = 12.5f, depth = 8.0f, height = 4.4f),
